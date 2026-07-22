@@ -1,3 +1,4 @@
+window.EHF_EMBALAGEM_RUNTIME_VERSION='4.2.23-PLANILHA-WORKER';
 (function(){
   window.EHFModules=window.EHFModules||{};
 
@@ -12,8 +13,16 @@
   };
 
   const API_BASE=()=>String(
+    window.EHF_TINY_WORKER_BASE||
     localStorage.getItem('ehf_worker_api_base')||
-    'https://atendente-vesco-separacao.2cwhzy.easypanel.host'
+    localStorage.getItem('ehf_summary_api_base')||
+    'https://atendente-vesco-tiny-worker.2cwhzy.easypanel.host'
+  ).replace(/\/+$/,'');
+
+  const PLANILHA_APP_URL=()=>String(
+    window.EHF_PLANILHA_APP_URL||
+    localStorage.getItem('ehf_planilha_app_url')||
+    'https://script.google.com/macros/s/AKfycbwQ8-Rn-zZJQM0fLm9js3ErtJZefRnHP55E3M0r3Z_TIXS_skTioZ6p3yHqTLFYxPU9/exec'
   ).replace(/\/+$/,'');
 
   const $=id=>document.getElementById(id);
@@ -38,6 +47,20 @@
     if(tbr)return tbr[1].toUpperCase();
     const tokens=raw.match(/[A-Za-z0-9_-]{8,40}/g)||[];
     return tokens.sort((a,b)=>b.length-a.length)[0]||raw.replace(/[^A-Za-z0-9_-]/g,'');
+  }
+
+  function planilhaLookupUrl(code){
+    const base=PLANILHA_APP_URL();
+    if(!base)return'';
+    return base+'?action=buscarSeparacao&codigo='+encodeURIComponent(code)+'&live=1&ts='+Date.now();
+  }
+
+  async function registrarFaltaNaPlanilha(code){
+    try{
+      const base=PLANILHA_APP_URL();
+      if(!base)return;
+      await fetch(base+'?action=debugCodigo&codigo='+encodeURIComponent(code)+'&ts='+Date.now(),{cache:'no-store'});
+    }catch(_){}
   }
 
   function injectStyles(){
@@ -479,7 +502,8 @@
         setTimeout(()=>$('ehfm-pack-confirm')?.focus(),60);
       }
     }catch(error){
-      alert(error.message||String(error));
+      await registrarFaltaNaPlanilha(raw).catch(()=>{});
+      alert((error.message||String(error))+' | Fonte: tiny-worker. Falta registrada na planilha se não existir alias.');
       setStatus('Etiqueta não localizada ou bloqueada.');
       $('ehfm-pack-input').disabled=false;
       $('ehfm-pack-search').disabled=false;

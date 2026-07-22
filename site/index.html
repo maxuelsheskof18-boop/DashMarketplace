@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <meta name="view-transition" content="same-origin">
-  <meta name="vesco-version" content="4.2.6-VERCEL-STATIC-ROOT-CORRIGIDO">
+  <meta name="vesco-version" content="4.2.11-ALARME-DIGITAVEL-E-BRANCO">
   <title>Dashboard de Separação — EHF</title>
 
   
@@ -3211,19 +3211,52 @@
 
 <script>
 (function(){
-  const EHF_API_BASE='https://atendente-vesco-separacao.2cwhzy.easypanel.host';
+  const EHF_GATEWAY_BASE=(window.EHF_GATEWAY_BASE||'https://atendente-vesco-separacao.2cwhzy.easypanel.host').replace(/\/+$/,'');
+  const EHF_TINY_WORKER_BASE=(window.EHF_TINY_WORKER_BASE||localStorage.getItem('ehf_summary_api_base')||'https://atendente-vesco-tiny-worker.2cwhzy.easypanel.host').replace(/\/+$/,'');
   const nativeFetch=window.fetch.bind(window);
+
+  function rewriteEHFUrl(raw){
+    if(!raw) return raw;
+    const txt=String(raw);
+
+    // Rotas canônicas: sempre no cérebro (tiny-worker), mesmo que algum módulo tente chamar o gateway antigo.
+    const workerRelative=/^\/api\/(embalagem|packing|scan|summary|formasEnvio|admin\/reindex-aliases|admin\/purge-unsafe-aliases|embalagem\/registrar-alias|sync\/status|health)(\/|\?|$)/.test(txt);
+    if(workerRelative) return EHF_TINY_WORKER_BASE+txt;
+    if(/^\/(summary|formasEnvio)$/.test(txt)) return EHF_TINY_WORKER_BASE+txt;
+
+    // Demais rotas relativas continuam no gateway/vesco-separacao.
+    if(/^\/api\//.test(txt)) return EHF_GATEWAY_BASE+txt;
+
+    // Proteção contra chamadas absolutas antigas para o gateway.
+    // Tudo que é cérebro operacional/embalagem/bipagem deve ir para o tiny-worker.
+    try{
+      const u=new URL(txt);
+      const isGateway=u.hostname.includes('atendente-vesco-separacao');
+      const workerAbsolute=/^\/api\/(embalagem|packing|scan|summary|formasEnvio|admin\/reindex-aliases|admin\/purge-unsafe-aliases|admin\/mirror-planilha-now|embalagem\/registrar-alias|produtos|sync\/status|health)(\/|\?|$)/.test(u.pathname);
+      const isCanonical=['/summary','/formasEnvio'].includes(u.pathname) || workerAbsolute;
+      if(isGateway && isCanonical){
+        return EHF_TINY_WORKER_BASE+u.pathname+u.search;
+      }
+    }catch(_){}
+
+    return raw;
+  }
+
   window.fetch=function(input,init){
     try{
       const raw=typeof input==='string'?input:input?.url;
-      if(raw&&(/^\/api\//.test(raw)||raw==='/summary'||raw==='/formasEnvio'||raw==='/produtividade'||raw==='/marcadores'||raw==='/pedidos-atrasados'||raw==='/embalagem/buscar')){
-        const target=EHF_API_BASE+raw;
-        return nativeFetch(target,init);
+      const target=rewriteEHFUrl(raw);
+      if(target!==raw){
+        return nativeFetch(target,{cache:'no-store',...(init||{})});
       }
     }catch(_){}
     return nativeFetch(input,init);
   };
-  window.EHF_API_BASE=EHF_API_BASE;
+
+  window.EHF_GATEWAY_BASE=EHF_GATEWAY_BASE;
+  window.EHF_TINY_WORKER_BASE=EHF_TINY_WORKER_BASE;
+  window.EHF_SUMMARY_API_BASE=EHF_TINY_WORKER_BASE;
+  window.EHF_API_BASE=EHF_GATEWAY_BASE;
 })();
 </script>
 
@@ -3297,6 +3330,7 @@ body[data-active-module="embalagem"] .top-counters,body[data-active-module="emba
     .ml-mode-grid{display:grid;grid-template-columns:1fr 1fr;gap:7px}.ml-mode{background:#0b0f15;border:1px solid rgba(255,255,255,.06);border-radius:9px;padding:8px}.ml-mode label{display:block;color:#94a3b8;font-size:9px;font-weight:900;text-transform:uppercase;margin-bottom:4px}.ml-mode b{font-size:18px}.ml-mode em{display:block;font-style:normal;color:#ef4444;font-size:9px;margin-top:3px;font-weight:800}.ml-mode em.warn{color:#fbbf24}.ml-count-pending{display:block;color:#fbbf24;font-size:8px;line-height:1.25;margin-top:2px;font-weight:700}.ml-deadline-status{margin-top:10px;color:#86efac;font-size:10px}.ml-deadline-status.warn{color:#fbbf24}.ml-deadline-status.error{color:#f87171}.ml-deadline-loading{grid-column:1/-1;color:#94a3b8;font-size:11px;padding:12px;text-align:center}
     @media(max-width:1100px){.ml-deadline-summary{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:650px){.ml-deadline-head{flex-direction:column}.ml-deadline-actions{justify-content:flex-start}.ml-deadline-summary{grid-template-columns:1fr}}
   </style>
+  <script>window.EHF_FRONTEND_PANEL_PACKAGE='4.2.23-PAINEL-REAL';document.documentElement.setAttribute('data-ehf-package','4.2.23');</script>
 </head>
 
 <body>
@@ -3820,8 +3854,8 @@ body[data-active-module="embalagem"] .top-counters,body[data-active-module="emba
       <section class="bip-pro-bottom">
         <div class="bip-pro-card bip-history-card">
           <div class="bip-history-topbar">
-            <h4>Histórico de leituras da sessão</h4>
-            <div class="bip-history-hint">Últimas leituras em ordem decrescente</div>
+            <h4>Romaneio em andamento</h4>
+            <div class="bip-history-hint">Leituras que entrarão no romaneio</div>
           </div>
 
           <div class="table-responsive">
@@ -3869,8 +3903,8 @@ body[data-active-module="embalagem"] .top-counters,body[data-active-module="emba
   <div id="view-atrasados" class="view-section ehf-module-view"><div id="ehf-atrasados-module" class="ehf-module-mount"></div></div>
   <div id="view-embalagem" class="view-section ehf-module-view"><div id="ehf-embalagem-module" class="ehf-module-mount"></div></div>
 
-  <script src="modules/atrasados.js?v=421" defer></script>
-  <script src="modules/embalagem.js?v=421" defer></script>
+  <script src="modules/atrasados.js?v=4227" defer></script>
+  <script src="modules/embalagem.js?v=4227" defer></script>
 
   <script>
 function toggleRow(key){const row=document.getElementById(`details-${key}`);if(row)row.classList.toggle('open')}
@@ -4254,7 +4288,8 @@ document.addEventListener('DOMContentLoaded',()=>setTimeout(ehfApplyHashView,0))
 
     (function() {
       const PROXY_BASE = '/api';
-      const API_BASE = (localStorage.getItem('ehf_worker_api_base') || 'https://atendente-vesco-separacao.2cwhzy.easypanel.host').replace(/\/+$/, '');
+      const API_BASE = (window.EHF_GATEWAY_BASE || 'https://atendente-vesco-separacao.2cwhzy.easypanel.host').replace(/\/+$/, '');
+      const SUMMARY_API_BASE = (window.EHF_SUMMARY_API_BASE || window.EHF_TINY_WORKER_BASE || 'https://atendente-vesco-tiny-worker.2cwhzy.easypanel.host').replace(/\/+$/, '');
       const WEB_APP_URL = API_BASE + '/exec';
 
       function appsScriptJsonp(action, params = {}, timeout = 30000) {
@@ -4678,31 +4713,37 @@ document.addEventListener('DOMContentLoaded',()=>setTimeout(ehfApplyHashView,0))
       }
 
       async function buscarResumo() {
-        const estado = await buscarEstadoOperacional();
-        if (estado?.summary) return {
-          ...estado.summary,
-          mercadoLivrePainel: estado.mercadoLivrePainel || null,
-          channelCountsExact: estado.channelCountsExact || null
-        };
-        if (estado && (estado.perStore || estado.aguardando !== undefined)) return estado;
-        try {
-          const exact = await fetchApiJson('/api/dashboard/contagem-exata', { timeout: 60000 });
-          if (exact?.summary) return exact.summary;
-          if (exact?.perStore) return exact;
-        } catch (error) {
-          console.warn('Contagem exata do Worker indisponível; tentando rota compatível:', error);
+        // Fonte única dos cards e status: tiny-worker.
+        // O gateway/vesco-separacao pode puxar pacotes, mas não pode sobrescrever o resumo canônico.
+        const data = await fetchApiJson(`${SUMMARY_API_BASE}/api/summary`, { noJsonp: true, timeout: 60000 });
+
+        // v4.2.7: o worker pode informar fallbackFrom quando consolida um snapshot vindo do app-state/planilha.
+        // Isso NÃO deve quebrar a tela se o payload já veio completo com total/mapped/perStore.
+        const temResumoUtil = !!(data && data.ok !== false && (data.mapped || data.perStore || data.raw?.perStore));
+        if (data?.fallbackFrom && temResumoUtil) {
+          console.warn('Resumo veio com fallbackFrom, mas será aceito por conter snapshot útil:', data.fallbackFrom);
+          data.__fallbackAceitoSemQuebrarCards = true;
+          return data;
         }
-        return fetchApiJson([
-          `${PROXY_BASE}/summary`,
-          '/summary'
-        ]);
+
+        if (data?.fallbackFrom && !temResumoUtil) {
+          throw new Error('Resumo rejeitado por fallback sem snapshot útil: '+data.fallbackFrom);
+        }
+
+        return data;
       }
 
       async function buscarFormasEnvio() {
-        return fetchApiJson([
-          `${PROXY_BASE}/formasEnvio`,
-          '/formasEnvio'
-        ]);
+        const data = await fetchApiJson(`${SUMMARY_API_BASE}/api/formasEnvio`, { noJsonp: true, timeout: 60000 });
+
+        // v4.2.7: formasEnvio de fallback não pode derrubar syncOnce.
+        // Se for fallback antigo, ignora e deixa os canais serem derivados do /api/summary.
+        if (data?.fallbackFrom === 'APP_STATE_SUMMARY_PLANILHA_LATEST') {
+          console.warn('FormasEnvio fallback ignorado sem quebrar sincronização:', data.fallbackFrom);
+          return null;
+        }
+
+        return data;
       }
 
       async function buscarProdutividade() {
@@ -4718,6 +4759,11 @@ document.addEventListener('DOMContentLoaded',()=>setTimeout(ehfApplyHashView,0))
         if (!stores) return stores;
 
         if (!formasEnvioData || !formasEnvioData.formasEnvio) {
+          return stores;
+        }
+
+        if (formasEnvioData.fallbackFrom === 'APP_STATE_SUMMARY_PLANILHA_LATEST') {
+          console.warn('Ignorando formasEnvio do fallback antigo:', formasEnvioData.fallbackFrom);
           return stores;
         }
 
@@ -4738,6 +4784,78 @@ document.addEventListener('DOMContentLoaded',()=>setTimeout(ehfApplyHashView,0))
         });
 
         return stores;
+      }
+
+
+      function ehfNumeroOperacional(v) {
+        const n = Number(v || 0);
+        return Number.isFinite(n) ? n : 0;
+      }
+
+      function ehfNormalizarStoreOperacional(store) {
+        const out = {
+          ...(store || {}),
+          aguardando: ehfNumeroOperacional(store?.aguardando),
+          emSeparacao: ehfNumeroOperacional(store?.emSeparacao ?? store?.em_separacao ?? store?.em_separao),
+          separadas: ehfNumeroOperacional(store?.separadas),
+          embaladas: ehfNumeroOperacional(store?.embaladas)
+        };
+        out.total = ehfNumeroOperacional(store?.total);
+        if (!out.total) out.total = out.aguardando + out.emSeparacao + out.separadas + out.embaladas;
+        return out;
+      }
+
+      function ehfStoresDoSnapshot(data) {
+        const rawStores = data?.raw?.perStore || data?.perStore || data?.dbSnapshot?.perStore || data?.summary?.perStore || {};
+        const out = {};
+
+        Object.entries(rawStores || {}).forEach(([rawKey, store]) => {
+          const key = normalizeStoreKey(rawKey);
+          if (!key) return;
+          out[key] = ehfNormalizarStoreOperacional(store);
+        });
+
+        // Garante todas as contas conectadas na tela. A planilha não é fonte operacional aqui.
+        ACCOUNTS.forEach(acc => {
+          if (!out[acc.key]) {
+            out[acc.key] = ehfNormalizarStoreOperacional({});
+          }
+        });
+
+        return out;
+      }
+
+      function ehfTotaisDeTodasAsContas(stores) {
+        const totais = { aguardando: 0, emSeparacao: 0, separadas: 0, embaladas: 0, total: 0 };
+        const keys = new Set([...ACCOUNTS.map(a => a.key), ...Object.keys(stores || {})]);
+
+        keys.forEach(key => {
+          const store = ehfNormalizarStoreOperacional(stores?.[key] || {});
+          totais.aguardando += store.aguardando;
+          totais.emSeparacao += store.emSeparacao;
+          totais.separadas += store.separadas;
+          totais.embaladas += store.embaladas;
+        });
+
+        totais.total = totais.aguardando + totais.emSeparacao + totais.separadas + totais.embaladas;
+        return totais;
+      }
+
+      function ehfAplicarCardsOperacionaisTodasContas(stores) {
+        const totais = ehfTotaisDeTodasAsContas(stores);
+        setText('total-a-separar', totais.aguardando);
+        setText('total-em-separacao', totais.emSeparacao);
+        setText('total-separadas', totais.separadas);
+        setText('total-embaladas', totais.embaladas);
+
+        totalEmbaladasAcumuladoTiny = Number(totais.embaladas || 0);
+        lastSyncRemaining = Number(totais.aguardando || 0) + Number(totais.emSeparacao || 0) + Number(totais.separadas || 0);
+        setText('remaining-to-pack', lastSyncRemaining);
+
+        const elAuditTiny = document.getElementById('audit-tiny-total');
+        if (elAuditTiny) elAuditTiny.textContent = totalEmbaladasAcumuladoTiny;
+
+        return totais;
       }
 
       async function syncOnce() {
@@ -4774,28 +4892,19 @@ document.addEventListener('DOMContentLoaded',()=>setTimeout(ehfApplyHashView,0))
 
           if (!data) return;
 
-          setText('total-a-separar', data.aguardando ?? 0);
-          setText('total-em-separacao', data.emSeparacao ?? 0);
-          setText('total-separadas', data.separadas ?? 0);
-          setText('total-embaladas', data.embaladas ?? 0);
+          if (!ehfPodeAplicarSnapshot(data)) return;
 
-          totalEmbaladasAcumuladoTiny = Number(data.embaladas || 0);
+          let stores = ehfStoresDoSnapshot(data);
+
+          stores = aplicarFormasEnvioNasLojas(stores, formasEnvioData);
+          stores = ehfMergeStoresNovas(stores);
+          const totaisOperacionais = ehfAplicarCardsOperacionaisTodasContas(stores);
 
           registrarSnapshotProducao(totalEmbaladasAcumuladoTiny);
-
-          const elAuditTiny = document.getElementById('audit-tiny-total');
-
-          if (elAuditTiny) {
-            elAuditTiny.textContent = totalEmbaladasAcumuladoTiny;
-          }
 
           if (typeof window.recalcularDivergenciaBipagem === 'function') {
             window.recalcularDivergenciaBipagem();
           }
-
-          let stores = data.raw?.perStore || data.perStore || {};
-
-          stores = aplicarFormasEnvioNasLojas(stores, formasEnvioData);
 
           ACCOUNTS.forEach(acc => {
             const store = stores[acc.key];
@@ -4809,27 +4918,20 @@ document.addEventListener('DOMContentLoaded',()=>setTimeout(ehfApplyHashView,0))
 
               buildRealTimeDetails(acc.key, store);
             } else {
-              setText(`row-${acc.key}-aguardando`, 0);
-              setText(`row-${acc.key}-separacao`, 0);
-              setText(`row-${acc.key}-separadas`, 0);
-              setText(`row-${acc.key}-embaladas`, 0);
-              setText(`row-${acc.key}-total`, 0);
+              // Não zera a loja quando uma leitura parcial vem sem ela; preserva último snapshot bom.
+              const previous = ehfLastGoodStores[acc.key];
+              if (previous) buildRealTimeDetails(acc.key, previous);
             }
           });
-
-          lastSyncRemaining =
-            Number(data.aguardando || 0) +
-            Number(data.emSeparacao || 0) +
-            Number(data.separadas || 0);
-
-          setText('remaining-to-pack', lastSyncRemaining);
 
           recalcularETALocal();
 
           const lastSync = document.getElementById('last-sync');
 
           if (lastSync) {
-            lastSync.textContent = formatHorarioBrasilia(new Date());
+            const syncMs = ehfSnapshotMs(data);
+            lastSync.textContent = formatHorarioBrasilia(syncMs ? new Date(syncMs) : new Date());
+            lastSync.title = 'Último snapshot operacional aceito';
           }
 
           console.log('Resumo recebido:', data);
@@ -4859,30 +4961,61 @@ document.addEventListener('DOMContentLoaded',()=>setTimeout(ehfApplyHashView,0))
 
       let ehfRealtimeSummaryBusy = false;
       let ehfRealtimeLastTs = '';
+      let ehfLastOperationalSnapshotMs = 0;
+      let ehfLastGoodStores = {};
+
+      function ehfSnapshotMs(data) {
+        const d = data?.ts || data?.time || data?.updatedAt || data?.atualizadoEm;
+        const ms = d ? new Date(d).getTime() : 0;
+        return Number.isFinite(ms) ? ms : 0;
+      }
+
+      function ehfPodeAplicarSnapshot(data) {
+        if (!data || data.ok === false) return false;
+        // v4.2.7: não rejeita automaticamente APP_STATE_SUMMARY_PLANILHA_LATEST quando o payload
+        // veio completo pelo tiny-worker. Só bloqueia snapshot vazio/inútil.
+        if (data.fallbackFrom === 'APP_STATE_SUMMARY_PLANILHA_LATEST' && !(data.mapped || data.perStore || data.raw?.perStore)) return false;
+        const hasNumbers = ['aguardando','emSeparacao','separadas','embaladas'].some(k => data[k] !== undefined && data[k] !== null);
+        const hasStores = !!(data?.raw?.perStore || data?.perStore);
+        if (!hasNumbers && !hasStores) return false;
+        const ms = ehfSnapshotMs(data);
+        if (ms && ehfLastOperationalSnapshotMs && ms + 1000 < ehfLastOperationalSnapshotMs) return false;
+        if (ms) ehfLastOperationalSnapshotMs = Math.max(ehfLastOperationalSnapshotMs, ms);
+        return true;
+      }
+
+      function ehfMergeStoresNovas(stores) {
+        const clean = {};
+        Object.entries(stores || {}).forEach(([k, v]) => {
+          const key = normalizeStoreKey(k);
+          if (!key) return;
+          clean[key] = ehfNormalizarStoreOperacional(v);
+          ehfLastGoodStores[key] = clean[key];
+        });
+        ACCOUNTS.forEach(acc => {
+          if (!clean[acc.key] && ehfLastGoodStores[acc.key]) clean[acc.key] = ehfLastGoodStores[acc.key];
+          if (!clean[acc.key]) clean[acc.key] = ehfNormalizarStoreOperacional({});
+        });
+        return { ...ehfLastGoodStores, ...clean };
+      }
 
       function aplicarResumoTempoReal(data) {
-        if (!data || data.ok === false) return;
+        if (!ehfPodeAplicarSnapshot(data)) return;
         const ts = String(data.ts || '');
         if (ts && ts === ehfRealtimeLastTs) return;
         ehfRealtimeLastTs = ts || ehfRealtimeLastTs;
 
-        setText('total-a-separar', data.aguardando ?? 0);
-        setText('total-em-separacao', data.emSeparacao ?? 0);
-        setText('total-separadas', data.separadas ?? 0);
-        setText('total-embaladas', data.embaladas ?? 0);
-        totalEmbaladasAcumuladoTiny = Number(data.embaladas || 0);
-        lastSyncRemaining = Number(data.aguardando || 0) + Number(data.emSeparacao || 0) + Number(data.separadas || 0);
-        setText('remaining-to-pack', lastSyncRemaining);
-
-        const stores = data.raw?.perStore || data.perStore || {};
+        const stores = ehfMergeStoresNovas(ehfStoresDoSnapshot(data));
+        const totaisOperacionais = ehfAplicarCardsOperacionaisTodasContas(stores);
         ACCOUNTS.forEach(acc => {
           const store = stores[acc.key];
-          setText(`row-${acc.key}-aguardando`, Number(store?.aguardando || 0));
-          setText(`row-${acc.key}-separacao`, Number(store?.emSeparacao || 0));
-          setText(`row-${acc.key}-separadas`, Number(store?.separadas || 0));
-          setText(`row-${acc.key}-embaladas`, Number(store?.embaladas || 0));
-          setText(`row-${acc.key}-total`, Number(store?.total || 0));
-          if (store) buildRealTimeDetails(acc.key, store);
+          if (!store) return;
+          setText(`row-${acc.key}-aguardando`, Number(store.aguardando || 0));
+          setText(`row-${acc.key}-separacao`, Number(store.emSeparacao || 0));
+          setText(`row-${acc.key}-separadas`, Number(store.separadas || 0));
+          setText(`row-${acc.key}-embaladas`, Number(store.embaladas || 0));
+          setText(`row-${acc.key}-total`, Number(store.total || 0));
+          buildRealTimeDetails(acc.key, store);
         });
 
         const lastSync = document.getElementById('last-sync');
@@ -4909,16 +5042,13 @@ document.addEventListener('DOMContentLoaded',()=>setTimeout(ehfApplyHashView,0))
       }
 
       function iniciarCanalResumoTempoReal() {
-        try {
-          const source = new EventSource(`${API_BASE}/api/events/summary`);
-          source.addEventListener('summary', (event) => {
-            try { aplicarResumoTempoReal(JSON.parse(event.data)); } catch (_) { sincronizarResumoTempoReal(); }
-          });
-          source.onerror = () => {};
-          window.ehfSummaryEventSource = source;
-        } catch (_) {}
-        // Fallback para redes/proxies que interrompem SSE.
-        setInterval(sincronizarResumoTempoReal, 3000);
+        // Desabilitado SSE do gateway antigo: ele entregava snapshot parcial e causava oscilação.
+        // A atualização em tempo real agora consulta somente o /api/summary canônico do tiny-worker.
+        if (window.ehfSummaryEventSource) {
+          try { window.ehfSummaryEventSource.close(); } catch (_) {}
+          window.ehfSummaryEventSource = null;
+        }
+        setInterval(sincronizarResumoTempoReal, 30000);
       }
 
 
@@ -5193,14 +5323,180 @@ document.addEventListener('DOMContentLoaded',()=>setTimeout(ehfApplyHashView,0))
       }
 
 
+
+      function ehfNovoCanalAccumulator() {
+        return { FLEX: 0, COLETA: 0, SHOPEE: 0, TIKTOK: 0, AMAZON: 0, MAGALU: 0, TRANSPORTADORA: 0, CORREIOS: 0, RETIRADA: 0, NAO_IDENTIFICADO: 0 };
+      }
+
+      const EHF_FORMA_ENVIO_CANAL_POR_CONTA = {
+        comercio: {
+          '769570519': 'COLETA',
+          '778029845': 'SHOPEE',
+          '780391986': 'FLEX',
+          '849173976': 'AMAZON',
+          '850044775': 'MAGALU',
+          '852535843': 'TRANSPORTADORA',
+          '854284026': 'TIKTOK',
+          '860463094': 'RETIRADA',
+          '747632293': 'CORREIOS',
+          '747632297': 'TRANSPORTADORA',
+          '747632298': 'RETIRADA'
+        },
+        suprimentos: {
+          '772849381': 'COLETA',
+          '778034480': 'SHOPEE',
+          '780375701': 'FLEX',
+          '849173976': 'AMAZON',
+          '850044775': 'MAGALU',
+          '852535843': 'TRANSPORTADORA',
+          '854284026': 'TIKTOK',
+          '860463094': 'RETIRADA',
+          '747632293': 'CORREIOS',
+          '747632297': 'TRANSPORTADORA',
+          '747632298': 'RETIRADA'
+        },
+        distribuidora: {
+          '778095610': 'SHOPEE',
+          '847199235': 'COLETA',
+          '780391986': 'FLEX',
+          '849173976': 'AMAZON',
+          '850044775': 'MAGALU',
+          '852535843': 'TRANSPORTADORA',
+          '854284026': 'TIKTOK',
+          '860463094': 'RETIRADA',
+          '747632293': 'CORREIOS',
+          '747632297': 'TRANSPORTADORA',
+          '747632298': 'RETIRADA'
+        },
+        ekn: {}
+      };
+
+      function ehfCanalPorIdFormaEnvio(rawId, storeKey) {
+        const id = String(rawId ?? '').trim();
+        if (!id) return null;
+        const loja = normalizeStoreKey(storeKey || '');
+        const porConta = EHF_FORMA_ENVIO_CANAL_POR_CONTA[loja] || {};
+        if (porConta[id]) return porConta[id];
+        const geral = {
+          '769570519': 'COLETA',
+          '772849381': 'COLETA',
+          '847199235': 'COLETA',
+          '778029845': 'SHOPEE',
+          '778034480': 'SHOPEE',
+          '778095610': 'SHOPEE',
+          '780391986': 'FLEX',
+          '780375701': 'FLEX',
+          '849173976': 'AMAZON',
+          '850044775': 'MAGALU',
+          '852535843': 'TRANSPORTADORA',
+          '854284026': 'TIKTOK',
+          '860463094': 'RETIRADA',
+          '747632293': 'CORREIOS',
+          '747632297': 'TRANSPORTADORA',
+          '747632298': 'RETIRADA'
+        };
+        return geral[id] || null;
+      }
+
+      function ehfNormalizarCanalNome(rawKey) {
+        const key = String(rawKey || '').toUpperCase();
+        if (!key) return 'NAO_IDENTIFICADO';
+        if (key.includes('FLEX')) return 'FLEX';
+        if (key.includes('COLETA') || key.includes('MERCADO ENVIOS') || key === 'ML' || key.includes('AGENCIA') || key.includes('AGÊNCIA')) return 'COLETA';
+        if (key.includes('SHOPEE') || key.includes('SPX')) return 'SHOPEE';
+        if (key.includes('TIKTOK')) return 'TIKTOK';
+        if (key.includes('AMAZON')) return 'AMAZON';
+        if (key.includes('MAGALU')) return 'MAGALU';
+        if (key.includes('CORREIO')) return 'CORREIOS';
+        if (key.includes('RETIR')) return 'RETIRADA';
+        if (key.includes('TRANSPORT') || key.includes('LOGGI')) return 'TRANSPORTADORA';
+        return 'NAO_IDENTIFICADO';
+      }
+
+      function ehfNormalizarCanalCountsObj(obj, storeKey) {
+        const out = ehfNovoCanalAccumulator();
+        if (!obj || typeof obj !== 'object') return out;
+        Object.entries(obj).forEach(([rawKey, rawValue]) => {
+          const value = Number(rawValue || 0);
+          if (!Number.isFinite(value) || value === 0) return;
+          const canal = ehfCanalPorIdFormaEnvio(rawKey, storeKey) || ehfNormalizarCanalNome(rawKey);
+          out[canal] = Number(out[canal] || 0) + value;
+        });
+        return out;
+      }
+
+      function ehfSomarCanalCounts(dest, src) {
+        Object.keys(dest).forEach(k => { dest[k] += Number(src?.[k] || 0); });
+        return dest;
+      }
+
+      function ehfSomarSituacaoEnvioCounts(store, storeKey) {
+        const out = ehfNovoCanalAccumulator();
+        const situacoes = store?.situacaoEnvioCounts || store?.formasEnvio || null;
+        if (!situacoes || typeof situacoes !== 'object') return out;
+        ['aguardando','emSeparacao','em_separacao','em_separao','separadas','embaladas','checkout'].forEach(statusKey => {
+          const counts = situacoes?.[statusKey];
+          if (counts && typeof counts === 'object') {
+            ehfSomarCanalCounts(out, ehfNormalizarCanalCountsObj(counts, storeKey));
+          }
+        });
+        return out;
+      }
+
+      function ehfSomarSituacaoCanalCounts(store, storeKey) {
+        const out = ehfNovoCanalAccumulator();
+        const situacoes = store?.situacaoCanalCounts || null;
+        if (!situacoes || typeof situacoes !== 'object') return out;
+        ['aguardando','emSeparacao','em_separacao','em_separao','separadas','embaladas','checkout'].forEach(statusKey => {
+          const counts = situacoes?.[statusKey];
+          if (counts && typeof counts === 'object') {
+            ehfSomarCanalCounts(out, ehfNormalizarCanalCountsObj(counts, storeKey));
+          }
+        });
+        return out;
+      }
+
+      function ehfCanalTotalIdentificado(counts) {
+        return Object.entries(counts || {}).reduce((acc, [key, value]) => key === 'NAO_IDENTIFICADO' ? acc : acc + Number(value || 0), 0);
+      }
+
+      function ehfBuildExecutiveChannelCounts(stores, data) {
+        const out = ehfNovoCanalAccumulator();
+
+        // v4.2.8: "Pacotes por canal" segue o Resumo Operacional por Loja.
+        // Não usar channelCountsExact nem MercadoLivrePainel aqui, porque esses dados vêm da leitura direta ML
+        // e podem incluir escopos diferentes da aba Envios de hoje. A base correta é situacaoEnvioCounts,
+        // preferencialmente por idFormaEnvio Tiny; se faltar, usar situacaoCanalCounts e, por último, canalCounts.
+        const origem = stores || data?.raw?.perStore || data?.perStore || data?.dbSnapshot?.perStore || {};
+        Object.entries(origem || {}).forEach(([rawStoreKey, store]) => {
+          const storeKey = normalizeStoreKey(rawStoreKey);
+          const porFormaEnvio = ehfSomarSituacaoEnvioCounts(store, storeKey);
+          if (ehfCanalTotalIdentificado(porFormaEnvio) > 0) {
+            ehfSomarCanalCounts(out, porFormaEnvio);
+            return;
+          }
+
+          const porNomeCanal = ehfSomarSituacaoCanalCounts(store, storeKey);
+          if (ehfCanalTotalIdentificado(porNomeCanal) > 0) {
+            ehfSomarCanalCounts(out, porNomeCanal);
+            return;
+          }
+
+          const counts = store?.strictCanalCounts || store?.canalCounts || {};
+          ehfSomarCanalCounts(out, ehfNormalizarCanalCountsObj(counts, storeKey));
+        });
+        return out;
+      }
+
       function atualizarPainelExecutivo(stores, data, produtividadeData) {
         try {
-          const total = Number(data?.total || 0);
-          const aguardando = Number(data?.aguardando || 0);
-          const emSeparacao = Number(data?.emSeparacao || 0);
-          const separadas = Number(data?.separadas || 0);
-          const embaladas = Number(data?.embaladas || 0);
-          const operacional = Math.max(aguardando + emSeparacao + separadas + embaladas, 1);
+          const totaisPainel = ehfTotaisDeTodasAsContas(stores || ehfStoresDoSnapshot(data));
+          const total = Number(totaisPainel.total || 0);
+          const aguardando = Number(totaisPainel.aguardando || 0);
+          const emSeparacao = Number(totaisPainel.emSeparacao || 0);
+          const separadas = Number(totaisPainel.separadas || 0);
+          const embaladas = Number(totaisPainel.embaladas || 0);
+          const operacional = Math.max(total, 1);
           const concluido = Math.min(100, Math.round((embaladas / operacional) * 100));
 
           setText('gauge-percent', `${concluido}%`);
@@ -5223,8 +5519,7 @@ document.addEventListener('DOMContentLoaded',()=>setTimeout(ehfApplyHashView,0))
           }
           if (riscoNote) riscoNote.textContent = riscoAlto ? 'Monitorando cutoffs' : 'Dentro do previsto';
 
-          const exact = data?.channelCountsExact || ultimoEstadoOperacional?.channelCountsExact || null;
-          const exactCounts = exact?.counts || {};
+          const exactCounts = ehfBuildExecutiveChannelCounts(stores, data);
           const canalAcc = {
             'Flex': Number(exactCounts.FLEX || 0),
             'Agência/Coleta': Number(exactCounts.COLETA || 0),
@@ -5244,8 +5539,8 @@ document.addEventListener('DOMContentLoaded',()=>setTimeout(ehfApplyHashView,0))
               const qtd = Number(canalAcc[nome] || 0);
               const pct = qtd > 0 ? Math.max(4, Math.round((qtd / maxCanal) * 100)) : 0;
               const fonte = nome === 'Flex' || nome === 'Agência/Coleta'
-                ? 'Mercado Livre direto'
-                : (nome === 'Não identificado' ? 'Sem identificador' : 'Separação Tiny');
+                ? 'Resumo por loja / idFormaEnvio Tiny'
+                : (nome === 'Não identificado' ? 'Sem identificador' : 'Resumo por loja / idFormaEnvio Tiny');
               return `<div class="bar-row" title="${fonte}; sem rateio"><span>${nome}</span><div class="bar-track"><i style="width:${pct}%"></i></div><b>${qtd}</b></div>`;
             }).join('');
           }
@@ -5254,7 +5549,7 @@ document.addEventListener('DOMContentLoaded',()=>setTimeout(ehfApplyHashView,0))
           const chartTotal = document.getElementById('chart-total-label');
           if (chartTotal) {
             chartTotal.textContent = `Total identificado: ${totalCanais}`;
-            chartTotal.title = 'Flex e Coleta: Mercado Livre direto. Demais canais: identificador de cada separação Tiny. Nenhum total é dividido.';
+            chartTotal.title = 'Canais calculados pelo Resumo Operacional por Loja usando idFormaEnvio Tiny; Mercado Livre direto não alimenta este gráfico.';
           }
 
           const enterpriseAlert = document.getElementById('enterprise-alert-count');
@@ -5387,7 +5682,7 @@ document.addEventListener('DOMContentLoaded',()=>setTimeout(ehfApplyHashView,0))
         atualizarProducaoRealUltimaHora();
         syncOnceComRelogio('inicial');
         iniciarCanalResumoTempoReal();
-        setTimeout(sincronizarResumoTempoReal, 1200);
+        setTimeout(sincronizarResumoTempoReal, 8000);
 
         setInterval(() => syncOnceComRelogio('auto'), SYNC_INTERVAL_MS);
         // O motor de alarme é iniciado no script principal do Firebase,
@@ -5426,7 +5721,8 @@ document.addEventListener('DOMContentLoaded',()=>setTimeout(ehfApplyHashView,0))
     }
   </script>
 
-  <script type="module" src="modules/painel-runtime.js?v=425"></script>
+  <script type="module" src="modules/painel-runtime.js?v=4227"></script>
+  <script src="modules/painel-guard.js?v=4226" defer></script>
 
 
   <script>

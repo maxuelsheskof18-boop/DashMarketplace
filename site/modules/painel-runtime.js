@@ -1,3 +1,11 @@
+window.EHF_PANEL_RUNTIME_VERSION='4.2.27-ROMANEIO-PLANILHA-MENSAL';
+(function(){
+  if (document.getElementById('ehf-bip-history-action-css')) return;
+  const st = document.createElement('style');
+  st.id = 'ehf-bip-history-action-css';
+  st.textContent = `#tabela-historico-bipagem th:last-child,#tabela-historico-bipagem td:last-child{position:sticky;right:0;background:#0f1724;z-index:3;min-width:96px;box-shadow:-8px 0 12px rgba(0,0,0,.28)}#tabela-historico-bipagem button{white-space:nowrap}.bip-history-topbar h4{color:#fff}`;
+  document.head.appendChild(st);
+})();
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
     import { getDatabase, ref, set, onValue, push } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
 
@@ -774,10 +782,9 @@
       {
         titulo: "SHOPEE",
         lojas: [
-          { id: 'shopee_remessa_1', name: 'SHOPEE ENVIO - REMESSA 1', defaultTime: '13:00', remessa: '1ª remessa' },
-          { id: 'shopee_remessa_2', name: 'SHOPEE ENVIO - REMESSA 2', defaultTime: '16:00', remessa: '2ª remessa' },
-          { id: 'spx', name: 'SPX ENTREGA RÁPIDA' },
-          { id: 'shopee_xpress', name: 'SHOPEE XPRESS' }
+          { id: 'spx_remessa_1', name: 'SPX ENTREGA - 1ª REMESSA', defaultTime: '13:00', remessa: '1ª remessa' },
+          { id: 'shopee_remessa_unica', name: 'SHOPEE ENVIO', defaultTime: '18:00', remessa: 'remessa única' },
+          { id: 'shopee_xpress', name: 'SHOPEE XPRESS', defaultTime: '15:00' }
         ]
       },
       {
@@ -799,7 +806,27 @@
     const ALARM_SNOOZE_MS = 10 * 60 * 1000;
     const ALARM_RESOLVED_RECHECK_MS = 10 * 60 * 1000;
     const ALARM_CHECK_MS = 30 * 1000;
+    const ML_ALARM_OFFSET_MINUTES = 60;
     const alarmState = {};
+
+    function ehfGarantirEstiloAlarmesML() {
+      if (document.getElementById('ehf-ml-auto-alarm-style')) return;
+      const style = document.createElement('style');
+      style.id = 'ehf-ml-auto-alarm-style';
+      style.textContent = `
+        .cp-time-block{display:inline-flex;flex-direction:column;gap:3px;align-items:flex-start;min-width:82px}
+        .cp-time-block small{font-size:8px;line-height:1;color:#93a4bc;font-weight:900;text-transform:uppercase;letter-spacing:.35px}
+        .cp-time-block.alarm small{color:#ffb454}
+        .cp-time-block.alarm input{border-color:rgba(255,138,0,.55);box-shadow:0 0 0 1px rgba(255,138,0,.10)}
+        .cp-time-block.alarm input.input-invalid{border-color:rgba(239,68,68,.85)!important;box-shadow:0 0 0 1px rgba(239,68,68,.28)!important;color:#fecaca!important}
+        .cp-time-block.alarm input::placeholder{color:#64748b}
+        .cp-alarm-meta{font-size:9px;color:#8ea0b8;width:100%;line-height:1.35;margin-top:-3px}
+        .cp-alarm-meta b{color:#ffb454}.cp-alarm-meta .manual{color:#fbbf24}.cp-alarm-meta .auto{color:#86efac}
+        .cp-auto-alarm-btn{border:1px solid rgba(255,138,0,.42);background:rgba(255,138,0,.08);color:#ffb454;border-radius:7px;padding:6px 8px;font-size:9px;font-weight:900;cursor:pointer;white-space:nowrap}
+        .cp-auto-alarm-btn:disabled{opacity:.45;cursor:not-allowed}
+      `;
+      document.head.appendChild(style);
+    }
 
     function gerenciarLoginServidor() {
       let user = localStorage.getItem('ehf_operador');
@@ -971,20 +998,357 @@
       return String(value ?? '').replace(/[&<>"']/g, (char) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[char]));
     }
 
-    function ehfPrintManifest(detail) {
-      if (!detail?.session) return;
-      const { session, scans = [], summary = {} } = detail;
-      const rows = scans.filter((scan) => scan.status !== 'NAO_LOCALIZADO').map((scan, index) => {
+    function ehfNormalizeBipCode(value) {
+      return String(value || '')
+        .toUpperCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/[^A-Z0-9]/g, '')
+        .trim();
+    }
+
+    function ehfBuildCodeVariantsForDuplicate(value) {
+      const base = ehfNormalizeBipCode(value);
+      if (!base) return [];
+      const variants = new Set([base]);
+      if (/^S[0-9]{8,}$/.test(base)) variants.add(base.slice(1));
+      if (/^MEL[0-9]{8,}/.test(base)) {
+        const m = base.match(/^MEL([0-9]{8,})/);
+        if (m) { variants.add(m[1]); variants.add('S' + m[1]); }
+      }
+      if (/^[0-9]{8,}$/.test(base)) { variants.add('S' + base); variants.add('MEL' + base); }
+      if (/^BR/.test(base)) {
+        variants.add(base.replace(/O$/,'0'));
+        variants.add(base.replace(/0$/,'O'));
+      }
+      return Array.from(variants).filter(Boolean);
+    }
+
+    function ehfBipagemMatchCode(bipagem, variants) {
+      if (!bipagem || !variants || !variants.length) return false;
+      const fields = [bipagem.codigo, bipagem.codigoLimpo, bipagem.idEtiqueta, bipagem.codigoRastreio, bipagem.pedidoMarketplace, bipagem.pedidoTiny];
+      return fields.some(value => variants.includes(ehfNormalizeBipCode(value)));
+    }
+
+    function ehfGetBipadosSessaoSet() {
+      const sessionId = String(ehfBipSession?.session?.id || 'sem-sessao');
+      try {
+        return new Set(JSON.parse(localStorage.getItem('ehf_bipados_sessao_' + sessionId) || '[]'));
+      } catch (_) {
+        return new Set();
+      }
+    }
+
+    function ehfSaveBipadosSessaoSet(set) {
+      const sessionId = String(ehfBipSession?.session?.id || 'sem-sessao');
+      try { localStorage.setItem('ehf_bipados_sessao_' + sessionId, JSON.stringify(Array.from(set).slice(-2500))); } catch (_) {}
+    }
+
+    function ehfCodigoJaMarcadoLocalmente(codigo) {
+      const variants = ehfBuildCodeVariantsForDuplicate(codigo);
+      if (!variants.length || !ehfBipSession?.session?.id) return false;
+      const set = ehfGetBipadosSessaoSet();
+      return variants.some(v => set.has(v));
+    }
+
+    function ehfMarcarCodigoBipadoLocal(codigo) {
+      const variants = ehfBuildCodeVariantsForDuplicate(codigo);
+      if (!variants.length || !ehfBipSession?.session?.id) return;
+      const set = ehfGetBipadosSessaoSet();
+      variants.forEach(v => set.add(v));
+      ehfSaveBipadosSessaoSet(set);
+    }
+
+    function ehfDesmarcarCodigoBipadoLocal(codigo) {
+      const variants = ehfBuildCodeVariantsForDuplicate(codigo);
+      if (!variants.length || !ehfBipSession?.session?.id) return;
+      const set = ehfGetBipadosSessaoSet();
+      variants.forEach(v => set.delete(v));
+      ehfSaveBipadosSessaoSet(set);
+    }
+
+    function ehfEncontrarBipagemDuplicadaNaSessao(codigo) {
+      const variants = ehfBuildCodeVariantsForDuplicate(codigo);
+      if (!variants.length || !ehfBipSession?.session?.id) return null;
+      if (ehfCodigoJaMarcadoLocalmente(codigo)) return { local: true, codigo };
+      const sessionId = String(ehfBipSession.session.id);
+      return (ehfBipagensCache || []).find(b => {
+        if (!b || b.removido) return false;
+        if (String(b.sessaoBipagemId || '') !== sessionId) return false;
+        return ehfBipagemMatchCode(b, variants);
+      }) || null;
+    }
+
+    async function ehfRemoverBipagem(firebaseKey) {
+      const key = String(firebaseKey || '').trim();
+      if (!key) return;
+      const item = (ehfBipagensCache || []).find(b => b._firebaseKey === key);
+      const codigo = item ? (item.idEtiqueta || item.codigoRastreio || item.codigo || '') : '';
+      if (!confirm(`Remover esta leitura${codigo ? ' (' + codigo + ')' : ''}?`)) return;
+      try {
+        await set(ref(db, diaPath('bipagens_dia') + '/' + key), null);
+        ehfDesmarcarCodigoBipadoLocal(codigo);
+        ehfBipToast('Leitura removida do romaneio. Agora a etiqueta pode ser bipada novamente.');
+      } catch (e) {
+        console.warn('Falha ao remover leitura:', e);
+        ehfBipToast('Não consegui remover esta leitura.', true);
+      }
+    }
+    window.ehfRemoverBipagem = ehfRemoverBipagem;
+
+    function ehfSlugRomaneio(value) {
+      return String(value || '')
+        .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+        .replace(/[^a-zA-Z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '')
+        .toLowerCase()
+        .slice(0, 70) || 'romaneio';
+    }
+
+    function ehfManifestBaseName(detail) {
+      const session = detail?.session || {};
+      const id = session.id || 'sem-numero';
+      const canal = ehfSlugRomaneio(session.channel_name || 'canal');
+      const coletor = ehfSlugRomaneio(session.collector_name || 'coletor');
+      const conferente = ehfSlugRomaneio(session.checker_name || session.operator || nomeOperadorLocal || 'conferente');
+      const agora = new Date();
+      const data = agora.toLocaleDateString('pt-BR').replace(/\D/g, '');
+      const hora = agora.toLocaleTimeString('pt-BR', {hour:'2-digit', minute:'2-digit'}).replace(/\D/g, '');
+      return `romaneio-${id}-${canal}-${coletor}-${conferente}-${data}-${hora}`;
+    }
+
+    function ehfBuildManifestHtml(detail) {
+      const { session, scans = [], summary = {} } = detail || {};
+      if (!session) return '';
+
+      const byCode = new Map();
+      function addManifestScan(scan, source) {
+        if (!scan) return;
+        const code = scan.normalized_code || scan.shipment_id || scan.code || scan.codigo || scan.idEtiqueta || scan.codigoRastreio || scan.pedidoMarketplace || scan.ecommerce_order_id || '';
+        const key = ehfNormalizeBipCode(code || JSON.stringify(scan).slice(0, 80));
+        if (!key || byCode.has(key)) return;
+        byCode.set(key, { ...scan, source });
+      }
+
+      (Array.isArray(scans) ? scans : []).forEach(scan => addManifestScan(scan, 'worker'));
+
+      const sessionId = String(session.id || '');
+      (ehfBipagensCache || []).forEach(b => {
+        if (!b || b.removido) return;
+        if (sessionId && String(b.sessaoBipagemId || '') !== sessionId) return;
+        addManifestScan({
+          account: b.lojaKey || b.lojaNome || '',
+          tiny_number: b.pedidoTiny || '',
+          ecommerce_order_id: b.pedidoMarketplace || '',
+          normalized_code: b.idEtiqueta || b.codigoRastreio || b.codigoLimpo || b.codigo || '',
+          code: b.codigo || '',
+          items: b.items || [],
+          total_units: Number(b.totalUnidades || b.total_units || 0),
+          status: b.status || 'Conferido',
+          channel_name: b.canalEsperado || b.canalNome || '',
+          operator: b.operador || '',
+          note: b.observacao || ''
+        }, 'firebase');
+      });
+
+      const manifestScans = Array.from(byCode.values()).filter(scan => String(scan.status || '').toUpperCase() !== 'REMOVIDO');
+      const rows = manifestScans.map((scan, index) => {
         const products = (scan.items || []).map((item) => `${Number(item.quantity || item.quantidade || 0)}x ${item.description || item.descricao || item.sku || item.codigo || ''}`).join('<br>');
-        return `<tr><td>${index + 1}</td><td>${ehfEscapeHtml((scan.account || '').toUpperCase())}</td><td>${ehfEscapeHtml(scan.tiny_number || '-')}</td><td>${ehfEscapeHtml(scan.ecommerce_order_id || '-')}</td><td>${ehfEscapeHtml(scan.normalized_code || scan.shipment_id || '-')}</td><td>${products || '-'}</td><td>${Number(scan.total_units || 0)}</td></tr>`;
+        const status = scan.status || (String(scan.channel_match || '').toLowerCase() === 'false' ? 'Canal divergente' : 'Conferido');
+        const statusColor = /diverg|nao|não|erro|bloq/i.test(status) ? '#b91c1c' : '#166534';
+        const note = scan.note ? `<br><small>${ehfEscapeHtml(scan.note)}</small>` : '';
+        return `<tr><td>${index + 1}</td><td>${ehfEscapeHtml((scan.account || '').toUpperCase())}</td><td>${ehfEscapeHtml(scan.tiny_number || '-')}</td><td>${ehfEscapeHtml(scan.ecommerce_order_id || '-')}</td><td>${ehfEscapeHtml(scan.normalized_code || scan.shipment_id || scan.code || '-')}</td><td>${products || '-'}</td><td>${Number(scan.total_units || 0)}</td><td style="color:${statusColor};font-weight:700;">${ehfEscapeHtml(status)}${note}</td></tr>`;
       }).join('');
-      const win = window.open('', '_blank', 'width=1100,height=800');
-      if (!win) return ehfBipToast('O navegador bloqueou a abertura do romaneio.', true);
-      win.document.write(`<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>Romaneio #${session.id}</title><style>body{font-family:Arial,sans-serif;color:#111;margin:26px}h1{margin:0;font-size:24px}.head{display:flex;justify-content:space-between;border-bottom:3px solid #111;padding-bottom:12px}.meta{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:16px 0}.meta div{border:1px solid #bbb;padding:9px}.meta span{display:block;font-size:10px;text-transform:uppercase;color:#555}.meta b{font-size:13px}table{width:100%;border-collapse:collapse;font-size:11px}th,td{border:1px solid #aaa;padding:7px;vertical-align:top}th{background:#eee}.totals{display:flex;gap:12px;margin:15px 0}.totals div{border:2px solid #111;padding:10px 16px}.signatures{display:grid;grid-template-columns:1fr 1fr;gap:50px;margin-top:70px}.signature{border-top:1px solid #111;text-align:center;padding-top:6px}.foot{margin-top:24px;font-size:9px;color:#555}@media print{button{display:none}body{margin:12mm}}</style></head><body><div class="head"><div><h1>EHF LOGÍSTICA</h1><div>Romaneio de coleta / expedição</div></div><div><b>ROMANEIO #${session.id}</b><br>${new Date().toLocaleString('pt-BR')}</div></div><div class="meta"><div><span>Canal</span><b>${ehfEscapeHtml(session.channel_name)}</b></div><div><span>Responsável / coletor</span><b>${ehfEscapeHtml(session.collector_name)}</b></div><div><span>Conferente</span><b>${ehfEscapeHtml(session.checker_name || session.operator)}</b></div><div><span>Início</span><b>${new Date(session.opened_at).toLocaleString('pt-BR')}</b></div><div><span>Fim</span><b>${session.closed_at ? new Date(session.closed_at).toLocaleString('pt-BR') : 'Em andamento'}</b></div><div><span>Observações</span><b>${ehfEscapeHtml(session.notes || '-')}</b></div></div><table><thead><tr><th>#</th><th>Loja</th><th>Pedido Tiny</th><th>Pedido marketplace</th><th>Etiqueta / envio</th><th>Produtos</th><th>Unidades</th></tr></thead><tbody>${rows || '<tr><td colspan="7">Nenhum pacote localizado.</td></tr>'}</tbody></table><div class="totals"><div><b>${Number(summary.packages || 0)}</b><br>pacotes</div><div><b>${Number(summary.uniqueOrders || 0)}</b><br>pedidos</div><div><b>${Number(summary.totalUnits || 0)}</b><br>unidades</div><div><b>${Number(summary.notFound || 0)}</b><br>não localizados</div></div><div class="signatures"><div class="signature">Entregue/conferido por: ${ehfEscapeHtml(session.checker_name || session.operator)}</div><div class="signature">Recebido por: ${ehfEscapeHtml(session.collector_name)}</div></div><div class="signatures"><div class="signature">Documento / placa</div><div class="signature">Assinatura e data/hora</div></div><div class="foot">Gerado pelo Dashboard de Separação EHF · sessão ${session.id}</div></body></html>`);
-      win.document.close();
-      setTimeout(() => {
-        try { win.focus(); win.print(); } catch (_) {}
-      }, 350);
+      const pacotesManifesto = Number(summary.packages || 0) || manifestScans.length;
+      const pedidosManifesto = Number(summary.uniqueOrders || 0) || new Set(manifestScans.map(s => s.ecommerce_order_id || s.tiny_number || s.normalized_code || s.code).filter(Boolean)).size;
+      const unidadesManifesto = Number(summary.totalUnits || 0) || manifestScans.reduce((acc, s) => acc + Number(s.total_units || 0), 0);
+      const divergentesManifesto = Number(summary.notFound || 0) || manifestScans.filter(s => /diverg|nao|não|erro|bloq/i.test(String(s.status || ''))).length;
+
+      return `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>${ehfManifestBaseName(detail)}</title><style>body{font-family:Arial,sans-serif;color:#111;margin:26px}h1{margin:0;font-size:24px}.head{display:flex;justify-content:space-between;border-bottom:3px solid #111;padding-bottom:12px}.meta{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:16px 0}.meta div{border:1px solid #bbb;padding:9px}.meta span{display:block;font-size:10px;text-transform:uppercase;color:#555}.meta b{font-size:13px}table{width:100%;border-collapse:collapse;font-size:11px}th,td{border:1px solid #aaa;padding:7px;vertical-align:top}th{background:#eee}.totals{display:flex;gap:12px;margin:15px 0}.totals div{border:2px solid #111;padding:10px 16px}.signatures{display:grid;grid-template-columns:1fr 1fr;gap:50px;margin-top:70px}.signature{border-top:1px solid #111;text-align:center;padding-top:6px}.foot{margin-top:24px;font-size:9px;color:#555}.print-actions{position:sticky;top:0;background:#fff;padding:8px 0;margin-bottom:8px;border-bottom:1px solid #ddd}.print-actions{display:flex;gap:8px;align-items:center;justify-content:space-between}.print-actions .left{display:flex;gap:8px;align-items:center}.print-actions button{background:#ff8a00;color:#111;border:0;border-radius:6px;padding:8px 12px;font-weight:700;cursor:pointer}.print-actions button.secondary{background:#111;color:#fff;border:1px solid #333}.summary-print{display:none}.compact-note{font-size:11px;color:#444;margin:8px 0 0}@media print{body.print-summary table.manifest-table{display:none}body.print-summary .summary-print{display:block}body.print-summary .print-complete-only{display:none}}@media print{.print-actions{display:none}body{margin:12mm}}</style></head><body class="print-summary"><div class="print-actions"><div class="left"><button onclick="document.body.classList.add('print-summary'); window.print()">Imprimir resumo 1 página</button><button class="secondary" onclick="document.body.classList.remove('print-summary'); window.print()">Imprimir lista completa</button></div><b>${ehfEscapeHtml(ehfManifestBaseName(detail))}</b></div><div class="head"><div><h1>EHF LOGÍSTICA</h1><div>Romaneio de coleta / expedição</div></div><div><b>ROMANEIO #${session.id}</b><br>${new Date().toLocaleString('pt-BR')}</div></div><div class="meta"><div><span>Canal</span><b>${ehfEscapeHtml(session.channel_name)}</b></div><div><span>Responsável / coletor</span><b>${ehfEscapeHtml(session.collector_name)}</b></div><div><span>Conferente</span><b>${ehfEscapeHtml(session.checker_name || session.operator)}</b></div><div><span>Início</span><b>${new Date(session.opened_at).toLocaleString('pt-BR')}</b></div><div><span>Fim</span><b>${session.closed_at ? new Date(session.closed_at).toLocaleString('pt-BR') : 'Em andamento'}</b></div><div><span>Observações</span><b>${ehfEscapeHtml(session.notes || '-')}</b></div></div><div class="summary-print"><h2>Resumo para coleta</h2><p>Este resumo é recomendado para assinar a coleta. A lista completa fica salva no arquivo do romaneio.</p><table><tbody><tr><td><b>Leituras</b></td><td>${pacotesManifesto}</td></tr><tr><td><b>Pedidos</b></td><td>${pedidosManifesto}</td></tr><tr><td><b>Unidades</b></td><td>${unidadesManifesto}</td></tr><tr><td><b>Divergentes / não localizados</b></td><td>${divergentesManifesto}</td></tr></tbody></table><p class="compact-note">Para mais de 80 pacotes, imprima apenas esta capa e mantenha a lista completa salva em HTML/PDF.</p></div><table class="manifest-table print-complete-only"><thead><tr><th>#</th><th>Loja</th><th>Pedido Tiny</th><th>Pedido marketplace</th><th>Etiqueta / envio</th><th>Produtos</th><th>Unidades</th><th>Status</th></tr></thead><tbody>${rows || '<tr><td colspan="8">Nenhum pacote localizado.</td></tr>'}</tbody></table><div class="totals"><div><b>${pacotesManifesto}</b><br>leituras</div><div><b>${pedidosManifesto}</b><br>pedidos</div><div><b>${unidadesManifesto}</b><br>unidades</div><div><b>${divergentesManifesto}</b><br>divergentes / não localizados</div></div><div class="signatures"><div class="signature">Entregue/conferido por: ${ehfEscapeHtml(session.checker_name || session.operator)}</div><div class="signature">Recebido por: ${ehfEscapeHtml(session.collector_name)}</div></div><div class="signatures"><div class="signature">Documento / placa</div><div class="signature">Assinatura e data/hora</div></div><div class="foot">Gerado pelo Dashboard de Separação EHF · sessão ${session.id}</div></body></html>`;
+    }
+
+
+
+    const EHF_ROMANEIO_WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbwQ8-Rn-zZJQM0fLm9js3ErtJZefRnHP55E3M0r3Z_TIXS_skTioZ6p3yHqTLFYxPU9/exec';
+    const EHF_ROMANEIO_PLANILHA_SECRET = '1329269';
+
+    function ehfBuildManifestScansForPlanilha(detail) {
+      const { session, scans = [], summary = {} } = detail || {};
+      const byCode = new Map();
+      function addManifestScan(scan, source) {
+        if (!scan) return;
+        const code = scan.normalized_code || scan.shipment_id || scan.code || scan.codigo || scan.idEtiqueta || scan.codigoRastreio || scan.pedidoMarketplace || scan.ecommerce_order_id || '';
+        const key = ehfNormalizeBipCode(code || JSON.stringify(scan).slice(0, 80));
+        if (!key || byCode.has(key)) return;
+        byCode.set(key, { ...scan, source });
+      }
+      (Array.isArray(scans) ? scans : []).forEach(scan => addManifestScan(scan, 'worker'));
+      const sessionId = String(session?.id || '');
+      (ehfBipagensCache || []).forEach(b => {
+        if (!b || b.removido) return;
+        if (sessionId && String(b.sessaoBipagemId || '') !== sessionId) return;
+        addManifestScan({
+          account: b.lojaKey || b.lojaNome || '',
+          tiny_number: b.pedidoTiny || '',
+          ecommerce_order_id: b.pedidoMarketplace || '',
+          normalized_code: b.idEtiqueta || b.codigoRastreio || b.codigoLimpo || b.codigo || '',
+          code: b.codigo || '',
+          items: b.items || [],
+          total_units: Number(b.totalUnidades || b.total_units || 0),
+          status: b.status || 'Conferido',
+          channel_name: b.canalEsperado || b.canalNome || '',
+          operator: b.operador || '',
+          note: b.observacao || ''
+        }, 'firebase');
+      });
+      const manifestScans = Array.from(byCode.values()).filter(scan => String(scan.status || '').toUpperCase() !== 'REMOVIDO');
+      const counts = {
+        leituras: Number(summary.packages || 0) || manifestScans.length,
+        pedidos: Number(summary.uniqueOrders || 0) || new Set(manifestScans.map(s => s.ecommerce_order_id || s.tiny_number || s.normalized_code || s.code).filter(Boolean)).size,
+        unidades: Number(summary.totalUnits || 0) || manifestScans.reduce((acc, s) => acc + Number(s.total_units || 0), 0),
+        divergentes: Number(summary.notFound || 0) || manifestScans.filter(s => /diverg|nao|não|erro|bloq/i.test(String(s.status || ''))).length
+      };
+      const rows = manifestScans.map((scan, index) => {
+        const products = (scan.items || []).map((item) => `${Number(item.quantity || item.quantidade || 0)}x ${item.description || item.descricao || item.sku || item.codigo || ''}`).join(' || ');
+        return {
+          ordem: index + 1,
+          loja: scan.account || '',
+          pedido_tiny: scan.tiny_number || '',
+          pedido_marketplace: scan.ecommerce_order_id || '',
+          etiqueta_envio: scan.normalized_code || scan.shipment_id || scan.code || '',
+          produtos: products || '',
+          unidades: Number(scan.total_units || 0),
+          status: scan.status || (String(scan.channel_match || '').toLowerCase() === 'false' ? 'Canal divergente' : 'Conferido'),
+          observacao: scan.note || '',
+          operador: scan.operator || '',
+          source: scan.source || ''
+        };
+      });
+      return { rows, counts };
+    }
+
+    function ehfBuildRomaneioPlanilhaPayload(detail, html, fileName, statusOverride) {
+      const session = detail?.session || {};
+      const built = ehfBuildManifestScansForPlanilha(detail);
+      const status = statusOverride || (session.closed_at ? 'FINALIZADO' : 'EM_ANDAMENTO');
+      const now = new Date();
+      return {
+        action: 'romaneioRegistro',
+        kind: 'romaneio-registro',
+        secret: EHF_ROMANEIO_PLANILHA_SECRET,
+        source: 'dashboard-separacao-ehf',
+        frontendVersion: window.EHF_PANEL_RUNTIME_VERSION || '4.2.27',
+        ts: now.toISOString(),
+        romaneio: {
+          romaneio_key: String(session.id || fileName || now.getTime()),
+          session_id: session.id || '',
+          file_name: (fileName || ehfManifestBaseName(detail)) + '.html',
+          status,
+          canal: session.channel_name || '',
+          account: session.account || '',
+          coletor: session.collector_name || '',
+          conferente: session.checker_name || session.operator || nomeOperadorLocal || '',
+          inicio: session.opened_at || '',
+          fim: session.closed_at || (status === 'FINALIZADO' ? now.toISOString() : ''),
+          observacoes: session.notes || '',
+          leituras: built.counts.leituras,
+          pedidos: built.counts.pedidos,
+          unidades: built.counts.unidades,
+          divergentes: built.counts.divergentes,
+          data_local: now.toLocaleDateString('pt-BR'),
+          hora_local: now.toLocaleTimeString('pt-BR', {hour:'2-digit', minute:'2-digit', second:'2-digit'})
+        },
+        itens: built.rows,
+        html: String(html || '').slice(0, 350000)
+      };
+    }
+
+    async function ehfRegistrarRomaneioPlanilha(detail, html, fileName, statusOverride) {
+      if (!detail?.session?.id || !EHF_ROMANEIO_WEB_APP_URL) return;
+      const payload = ehfBuildRomaneioPlanilhaPayload(detail, html, fileName, statusOverride);
+      try {
+        localStorage.setItem('ehf_ultimo_romaneio_payload', JSON.stringify({ ts: payload.ts, romaneio: payload.romaneio, itens: payload.itens.length }).slice(0, 5000));
+      } catch (_) {}
+      try {
+        const body = JSON.stringify(payload);
+        await fetch(EHF_ROMANEIO_WEB_APP_URL, {
+          method: 'POST',
+          mode: 'no-cors',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body
+        });
+        console.info('[EHF] Romaneio enviado para planilha mensal:', payload.romaneio.file_name, payload.romaneio.status, payload.itens.length);
+      } catch (err) {
+        console.warn('[EHF] Falha ao registrar romaneio na planilha:', err);
+        try {
+          const pendentes = JSON.parse(localStorage.getItem('ehf_romaneios_pendentes') || '[]');
+          pendentes.push(payload);
+          localStorage.setItem('ehf_romaneios_pendentes', JSON.stringify(pendentes.slice(-20)));
+        } catch (_) {}
+      }
+    }
+    window.ehfRegistrarRomaneioPlanilha = ehfRegistrarRomaneioPlanilha;
+
+    function ehfOpenManifestWindow(html, existingWin, fileName) {
+      let win = existingWin || null;
+      try {
+        if (!win || win.closed) win = window.open('', '_blank', 'width=1100,height=800');
+      } catch (_) {}
+      if (win) {
+        win.document.open();
+        win.document.write(html);
+        win.document.close();
+        setTimeout(() => {
+          try { win.focus(); win.print(); } catch (_) {}
+        }, 650);
+        return true;
+      }
+
+      try {
+        const iframe = document.createElement('iframe');
+        iframe.style.position = 'fixed';
+        iframe.style.right = '0';
+        iframe.style.bottom = '0';
+        iframe.style.width = '1px';
+        iframe.style.height = '1px';
+        iframe.style.border = '0';
+        iframe.onload = () => {
+          setTimeout(() => {
+            try { iframe.contentWindow.focus(); iframe.contentWindow.print(); } catch (_) {}
+            setTimeout(() => iframe.remove(), 5000);
+          }, 250);
+        };
+        document.body.appendChild(iframe);
+        iframe.contentDocument.open();
+        iframe.contentDocument.write(html);
+        iframe.contentDocument.close();
+        return true;
+      } catch (_) {}
+
+      try {
+        const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = (fileName || 'romaneio-ehf') + '.html';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+        ehfBipToast('O pop-up foi bloqueado. Baixei o romaneio em HTML para imprimir.', true);
+        return true;
+      } catch (_) {}
+
+      return false;
+    }
+
+    function ehfPrintManifest(detail, existingWin, statusOverride) {
+      if (!detail?.session) return;
+      const html = ehfBuildManifestHtml(detail);
+      const fileName = ehfManifestBaseName(detail);
+      ehfRegistrarRomaneioPlanilha(detail, html, fileName, statusOverride);
+      const opened = ehfOpenManifestWindow(html, existingWin, fileName);
+      if (!opened) ehfBipToast('Não foi possível abrir ou gerar o romaneio.', true);
     }
 
     async function ehfRefreshBipSession() {
@@ -998,14 +1362,22 @@
     async function ehfFinishBipSession() {
       if (!ehfBipSession?.session?.id) return;
       if (!confirm(`Finalizar a conferência com ${ehfBipSession.summary?.packages || 0} pacotes e gerar o romaneio?`)) return;
+      const printWin = window.open('', '_blank', 'width=1100,height=800');
+      if (printWin) {
+        printWin.document.write('<!doctype html><html><head><meta charset="utf-8"><title>Gerando romaneio...</title></head><body style="font-family:Arial;padding:24px"><h2>Gerando romaneio...</h2><p>Aguarde.</p></body></html>');
+        printWin.document.close();
+      }
       try {
         const detail = await ehfApi(`/api/bipagem/sessoes/${ehfBipSession.session.id}/finalizar`, { method:'POST', body:JSON.stringify({ signedBy: ehfBipSession.session.collector_name }) });
-        ehfPrintManifest(detail);
+        ehfPrintManifest(detail, printWin, 'FINALIZADO');
         localStorage.removeItem('ehf_bip_session_id');
         ehfRenderBipSession(detail);
         ehfBipSession = null;
         setTimeout(() => ehfRenderBipSession(null), 800);
-      } catch (error) { ehfBipToast(error.message, true); }
+      } catch (error) {
+        try { if (printWin && !printWin.closed) printWin.close(); } catch (_) {}
+        ehfBipToast(error.message, true);
+      }
     }
 
     window.ehfEnsureBipSession = function() {
@@ -1019,6 +1391,7 @@
     document.getElementById('btn-bip-session-start')?.addEventListener('click', ehfOpenBipSessionModal);
     document.getElementById('btn-bip-session-cancel')?.addEventListener('click', ehfCloseBipSessionModal);
     document.getElementById('btn-bip-session-confirm')?.addEventListener('click', ehfStartBipSession);
+    window.ehfPrintManifestAtual = () => ehfPrintManifest(ehfBipSession);
     document.getElementById('btn-bip-session-manifest')?.addEventListener('click', () => ehfPrintManifest(ehfBipSession));
     document.getElementById('btn-bip-session-finish')?.addEventListener('click', ehfFinishBipSession);
     document.getElementById('bip-session-modal')?.addEventListener('click', (event) => { if (event.target.id === 'bip-session-modal') ehfCloseBipSessionModal(); });
@@ -1304,6 +1677,14 @@
         return;
       }
       const input = document.getElementById('input-leitor-codigo');
+      const duplicada = ehfEncontrarBipagemDuplicadaNaSessao(codigoDigitado);
+      if (duplicada) {
+        tocarSomConfirmacaoLeitura(false);
+        ehfBipToast('Etiqueta já bipada nesta conferência. Use Remover se foi bipe errado.', true);
+        if (input) { input.value = ''; input.focus(); }
+        return;
+      }
+      ehfMarcarCodigoBipadoLocal(codigoDigitado);
       if (input) input.disabled = true;
       try {
         // Pré-resolução rápida: usa cache, atraso do Mercado Livre e, somente quando
@@ -1352,6 +1733,7 @@
         const payloadBipagem = {
           codigo: codigoDigitado,
           codigoLimpo: infoEtiqueta.codigoLimpo || lookup.codigoNormalizado || codigoDigitado,
+          codigoDuplicidade: ehfBuildCodeVariantsForDuplicate(infoEtiqueta.codigoLimpo || lookup.codigoNormalizado || codigoDigitado)[0] || '',
           plataforma: infoEtiqueta.plataforma,
           canal: infoEtiqueta.canal,
           canalNome: infoEtiqueta.canalNome,
@@ -1377,11 +1759,13 @@
           ts: agora
         };
         await set(novaBipagemRef, payloadBipagem).catch(() => {});
+        ehfMarcarCodigoBipadoLocal(payloadBipagem.idEtiqueta || payloadBipagem.codigoRastreio || payloadBipagem.codigo || codigoDigitado);
         tocarSomConfirmacaoLeitura(data.channelMatch !== false);
         const corStatus = data.channelMatch !== false ? '#5bae5f' : '#ef4444';
         set(alertaBroadcastRef, { txt: `O operador <b>${nomeOperadorLocal}</b> bipou: <b>${payloadBipagem.lojaNome}</b> — <b>${payloadBipagem.canalEsperado}</b> <span style="color:${corStatus};">(${payloadBipagem.status})</span><br>Pedido: <b>${payloadBipagem.pedidoMarketplace || payloadBipagem.pedidoTiny || '-'}</b> · Código: <b>${payloadBipagem.idEtiqueta || payloadBipagem.codigoRastreio || codigoDigitado}</b>`, ts: agora });
         ehfBipToast(`${payloadBipagem.lojaNome} · pedido ${payloadBipagem.pedidoMarketplace || payloadBipagem.pedidoTiny || 'localizado'} · ${payloadBipagem.totalUnidades} unidade(s)`);
       } catch (error) {
+        ehfDesmarcarCodigoBipadoLocal(codigoDigitado);
         const detail = error.data?.session;
         if (detail) ehfRenderBipSession(detail);
         tocarSomConfirmacaoLeitura(false);
@@ -1396,7 +1780,7 @@
       if (!tabela) return;
       const thead = tabela.querySelector("thead");
       if (!thead) return;
-      thead.innerHTML = `<tr><th>Horário</th><th>Loja</th><th>Plataforma</th><th>Canal</th><th>Código / ID</th><th>Operador</th><th>Status</th></tr>`;
+      thead.innerHTML = `<tr><th>Horário</th><th>Loja</th><th>Plataforma</th><th>Canal</th><th>Código / ID</th><th>Operador</th><th>Status</th><th>Ação</th></tr>`;
     }
 
     function abreviarLojaBipagem(lojaKey) {
@@ -1648,7 +2032,10 @@
       totalBipadosFisico = 0;
       let bipesNaUltimaHora = 0;
       const umaHoraAtras = Date.now() - (60 * 60 * 1000);
-      const listaOrdenada = dados ? Object.values(dados).sort((a, b) => Number(b.ts || 0) - Number(a.ts || 0)) : [];
+      const listaOrdenada = dados ? Object.entries(dados)
+        .map(([key, value]) => ({ ...(value || {}), _firebaseKey: key }))
+        .filter(b => !b.removido)
+        .sort((a, b) => Number(b.ts || 0) - Number(a.ts || 0)) : [];
       ehfBipagensCache = listaOrdenada.map(b => {
         if (!b.canalNome || b.canalNome === "Desconhecido" || b.plataforma === "Desconhecida") {
           const reprocessado = identificarEtiqueta(b.codigo || b.codigoLimpo || "");
@@ -1666,7 +2053,8 @@
         const status = b.status || "Conferido";
         const statusColor = status === "Conferido" ? "var(--success)" : "var(--danger)";
         const tr = document.createElement("tr");
-        tr.innerHTML = `<td>${b.horario || "--:--:--"}</td><td><b>${lojaNome}</b></td><td>${plataforma}</td><td>${canalNome}</td><td><b>${codigoPrincipal}</b><div style="font-size:10px;color:var(--muted);max-width:360px;overflow:hidden;text-overflow:ellipsis;">${b.observacao || ""}</div></td><td>${b.operador || "-"}</td><td style="color:${statusColor};font-weight:700;">${status}</td>`;
+        const removeKey = b._firebaseKey || '';
+        tr.innerHTML = `<td>${b.horario || "--:--:--"}</td><td><b>${lojaNome}</b></td><td>${plataforma}</td><td>${canalNome}</td><td><b>${codigoPrincipal}</b><div style="font-size:10px;color:var(--muted);max-width:360px;overflow:hidden;text-overflow:ellipsis;">${b.observacao || ""}</div></td><td>${b.operador || "-"}</td><td style="color:${statusColor};font-weight:700;">${status}</td><td><button type="button" onclick="window.ehfRemoverBipagem && window.ehfRemoverBipagem('${ehfEscapeHtml(removeKey)}')" style="border:1px solid rgba(239,68,68,.55);background:rgba(239,68,68,.08);color:#fecaca;border-radius:7px;padding:5px 8px;font-size:10px;font-weight:900;cursor:pointer;">Remover</button></td>`;
         listaTbody.appendChild(tr);
       });
       atualizarContagemBipadaNoResumo();
@@ -1839,6 +2227,185 @@
       return (h * 60) + m;
     }
 
+    function minutesToTime(totalMinutes) {
+      if (!Number.isFinite(totalMinutes)) return '';
+      const normalized = ((Math.round(totalMinutes) % 1440) + 1440) % 1440;
+      const h = String(Math.floor(normalized / 60)).padStart(2, '0');
+      const m = String(normalized % 60).padStart(2, '0');
+      return `${h}:${m}`;
+    }
+
+    function normalizarHorarioHHMM(value) {
+      const minutos = timeToMinutes(value);
+      return minutos === null ? '' : minutesToTime(minutos);
+    }
+
+    function normalizarHorarioDigitavel(value) {
+      const raw = String(value || '').trim();
+      if (!raw) return { ok: true, value: '', empty: true };
+
+      const somenteDigitos = raw.replace(/\D/g, '');
+
+      // Aceita digitação simples: 8 => 08:00, 13 => 13:00, 930 => 09:30, 1530 => 15:30.
+      if (/^\d{1,4}$/.test(somenteDigitos) && raw.replace(/\d/g, '') === '') {
+        let h = 0;
+        let m = 0;
+
+        if (somenteDigitos.length <= 2) {
+          h = Number(somenteDigitos);
+          m = 0;
+        } else if (somenteDigitos.length === 3) {
+          h = Number(somenteDigitos.slice(0, 1));
+          m = Number(somenteDigitos.slice(1));
+        } else {
+          h = Number(somenteDigitos.slice(0, 2));
+          m = Number(somenteDigitos.slice(2));
+        }
+
+        if (h >= 0 && h <= 23 && m >= 0 && m <= 59) {
+          return { ok: true, value: `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`, empty: false };
+        }
+
+        return { ok: false, value: '', empty: false };
+      }
+
+      const normalizado = normalizarHorarioHHMM(raw);
+      return normalizado ? { ok: true, value: normalizado, empty: false } : { ok: false, value: '', empty: false };
+    }
+
+    function calcularAlarmeUmaHoraAntes(horarioLimite) {
+      const minutos = timeToMinutes(horarioLimite);
+      if (minutos === null) return '';
+      return minutesToTime(minutos - ML_ALARM_OFFSET_MINUTES);
+    }
+
+    function getHorarioAlarmeTask(task) {
+      if (!task) return '';
+
+      // Se o operador apagou manualmente o alarme, respeita vazio.
+      if (task.alarmManual) {
+        return normalizarHorarioHHMM(task.alarmTime || '');
+      }
+
+      return normalizarHorarioHHMM(task.alarmTime || '') || calcularAlarmeUmaHoraAntes(task.time || '') || normalizarHorarioHHMM(task.time || '');
+    }
+
+    function atualizarAlarmeAutomatico(task, force = false) {
+      if (!task || task.semHorario) return false;
+      const auto = calcularAlarmeUmaHoraAntes(task.time || '');
+      if (!auto) return false;
+      // Se está manual, inclusive manual em branco, não sobrescreve.
+      if (!force && task.alarmManual) return false;
+      const mudou = task.alarmTime !== auto || task.alarmOffsetMinutes !== ML_ALARM_OFFSET_MINUTES;
+      task.alarmTime = auto;
+      task.alarmOffsetMinutes = ML_ALARM_OFFSET_MINUTES;
+      task.alarmManual = false;
+      task.alarmFonte = 'AUTO_ML_MENOS_1H';
+      return mudou;
+    }
+
+    function aplicarHorarioLimiteTask(task, horario, origem = 'manual', options = {}) {
+      if (!task || task.semHorario) return false;
+      const normalizado = normalizarHorarioHHMM(horario);
+      if (!normalizado) return false;
+
+      const manual = origem === 'manual';
+      if (!manual && task.deadlineManual && !options.force) return false;
+
+      const mudou = task.time !== normalizado;
+      task.time = normalizado;
+      task.mlDeadlineTime = origem === 'mercado_livre' ? normalizado : (task.mlDeadlineTime || '');
+      if (manual) task.deadlineManual = true;
+      else task.deadlineManual = false;
+
+      const mudouAlarme = atualizarAlarmeAutomatico(task, !!options.forceAlarm);
+      if (mudou || mudouAlarme) limparAlarmeTask(task.id);
+      return mudou || mudouAlarme;
+    }
+
+    function menorHorarioValido(horarios) {
+      const minutos = (horarios || [])
+        .map(timeToMinutes)
+        .filter(v => v !== null)
+        .sort((a, b) => a - b);
+      return minutos.length ? minutesToTime(minutos[0]) : '';
+    }
+
+    function extrairHorarioCampo(obj, campos) {
+      for (const campo of campos) {
+        const valor = campo.split('.').reduce((acc, key) => acc && acc[key] !== undefined ? acc[key] : undefined, obj);
+        const horario = normalizarHorarioHHMM(valor);
+        if (horario) return horario;
+      }
+      return '';
+    }
+
+    function extrairHorarioModoML(account, modo) {
+      const hoje = account?.enviosHoje || account?.today || account?.tabToday || account?.TAB_TODAY || {};
+      const bloco = hoje?.[modo] || hoje?.[String(modo || '').toUpperCase()] || account?.[modo] || {};
+      return extrairHorarioCampo(bloco, ['cutoff', 'cutoffTime', 'deadline', 'deadlineTime', 'horario', 'time', 'until', 'limite', 'horarioLimite']) ||
+        extrairHorarioCampo(account, modo === 'coleta'
+          ? ['cutoff', 'cutoffTime', 'coleta.cutoff', 'coleta.cutoffTime', 'agencyCutoff', 'horarioColeta', 'horarioLimite']
+          : ['flex.cutoff', 'flex.cutoffTime', 'flexDeadline', 'horarioFlex']);
+    }
+
+    function aplicarAlarmesDoMercadoLivre(data) {
+      const accounts = Array.isArray(data?.accounts) ? data.accounts : [];
+      if (!accounts.length) return false;
+
+      const mapContaTask = {
+        comercio: 'comercio',
+        ehf_comercio: 'comercio',
+        suprimentos: 'suprimentos',
+        ehf_suprimentos: 'suprimentos',
+        distribuidora: 'distribuidora',
+        ehf_distribuidora: 'distribuidora',
+        ekn: 'ekn'
+      };
+
+      let mudou = false;
+      const horariosColeta = [];
+      const horariosFlex = [];
+
+      accounts.forEach(account => {
+        const rawKey = String(account?.key || account?.account || account?.id || account?.label || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
+        const taskId = mapContaTask[rawKey] || mapContaTask[rawKey.replace(/^ehf_/, '')];
+        const horarioColeta = extrairHorarioModoML(account, 'coleta');
+        const horarioFlex = extrairHorarioModoML(account, 'flex');
+
+        if (horarioColeta) horariosColeta.push(horarioColeta);
+        if (horarioFlex) horariosFlex.push(horarioFlex);
+
+        if (taskId && horarioColeta) {
+          const task = getTaskById(taskId);
+          mudou = aplicarHorarioLimiteTask(task, horarioColeta, 'mercado_livre') || mudou;
+        }
+      });
+
+      const coletaMaster = getTaskById('mercado_envios_coleta');
+      const horarioColetaMaster = menorHorarioValido(horariosColeta);
+      if (horarioColetaMaster) mudou = aplicarHorarioLimiteTask(coletaMaster, horarioColetaMaster, 'mercado_livre') || mudou;
+
+      const flexMaster = getTaskById('mercado_envios_flex');
+      const horarioFlexMaster = menorHorarioValido(horariosFlex);
+      if (horarioFlexMaster) mudou = aplicarHorarioLimiteTask(flexMaster, horarioFlexMaster, 'mercado_livre') || mudou;
+
+      ['mercado_livre_remessa_1', 'mercado_livre_remessa_2', 'shopee_remessa_1', 'shopee_remessa_2'].forEach(id => {
+        const task = getTaskById(id);
+        if (task && task.time && !task.alarmManual) mudou = atualizarAlarmeAutomatico(task, false) || mudou;
+      });
+
+      if (mudou) {
+        renderEstructuralHTML();
+        pushStateToFirebase();
+        verificarAlarmesDePrazo();
+      }
+
+      return mudou;
+    }
+
+    window.ehfAplicarAlarmesDoMercadoLivre = aplicarAlarmesDoMercadoLivre;
+
     function taskTemAlgumaCaixaMarcada(task) {
       // Finalizado agora é apenas registro interno de produção.
       // Ele NÃO encerra o alarme de saída do galpão.
@@ -1859,9 +2426,9 @@
           return false;
         }
 
-        const limiteMinutos = timeToMinutes(t.time);
-        if (limiteMinutos === null) return false;
-        if (minutosAgora < limiteMinutos) return false;
+        const alarmeMinutos = timeToMinutes(getHorarioAlarmeTask(t));
+        if (alarmeMinutos === null) return false;
+        if (minutosAgora < alarmeMinutos) return false;
 
         const estado = alarmState[t.id] || {};
         if (estado.snoozeUntil && agoraMs < estado.snoozeUntil) return false;
@@ -1877,8 +2444,11 @@
       alarmState[atrasada.id] = alarmState[atrasada.id] || {};
       alarmState[atrasada.id].lastAlarmAt = agoraMs;
 
+      const horarioAlarme = getHorarioAlarmeTask(atrasada);
+      const limiteMinutos = timeToMinutes(atrasada.time);
+      const prazoVencido = limiteMinutos !== null && minutosAgora >= limiteMinutos;
       executarAlarmeVisualESonoroLocal(
-        `Prazo vencido: <b>${atrasada.name}</b> tinha limite às <b>${atrasada.time}</b> e ainda não foi marcado como Coletado ou Enviado.`,
+        `${prazoVencido ? 'Prazo vencido' : 'Alarme de saída'}: <b>${atrasada.name}</b>. Alarme programado para <b>${horarioAlarme || '--:--'}</b>${atrasada.time ? `, prazo limite <b>${atrasada.time}</b>` : ''}. Ainda não foi marcado como Coletado ou Enviado.`,
         atrasada.id
       );
     }
@@ -1913,10 +2483,16 @@
     }
 
     function criarTaskPadrao(config) {
+      const horarioPadrao = config.defaultTime || '';
       return {
         id: config.id,
         name: config.name,
-        time: config.defaultTime || '',
+        time: horarioPadrao,
+        alarmTime: calcularAlarmeUmaHoraAntes(horarioPadrao),
+        alarmManual: false,
+        deadlineManual: false,
+        alarmOffsetMinutes: ML_ALARM_OFFSET_MINUTES,
+        mlDeadlineTime: '',
         coletado: false,
         enviado: false,
         finalizado: false,
@@ -1944,6 +2520,10 @@
         if (!task.time && config.defaultTime) {
           task.time = config.defaultTime;
         }
+
+        if (!task.alarmManual && !task.alarmTime && task.time) {
+          atualizarAlarmeAutomatico(task, true);
+        }
       });
 
       localTasks = localTasks.filter(task => configs.some(config => config.id === task.id));
@@ -1966,6 +2546,9 @@
 
       const inputTime = document.getElementById(`time-${taskId}`);
       if (inputTime) task.time = inputTime.value || '';
+
+      const inputAlarm = document.getElementById(`alarm-${taskId}`);
+      if (inputAlarm) task.alarmTime = inputAlarm.value || '';
     }
 
     function aplicarStatusExclusivoTask(task, status, checked) {
@@ -2009,8 +2592,7 @@
 
         if (!task || task.semHorario) return;
 
-        task.time = horario || '';
-        limparAlarmeTask(id);
+        aplicarHorarioLimiteTask(task, horario || '', 'manual', { forceAlarm: false });
       });
     }
 
@@ -2119,8 +2701,7 @@
             timeInput.addEventListener('change', () => {
               const horario = timeInput.value || '';
 
-              t.time = horario;
-              limparAlarmeTask(t.id);
+              aplicarHorarioLimiteTask(t, horario, 'manual', { forceAlarm: false });
 
               if (GROUP_TARGETS[t.id]) {
                 aplicarHorarioGrupo(t.id, horario);
@@ -2146,8 +2727,106 @@
           const labelEn = criarCheckboxControle(t, 'enviado', 'Enviado', config, false);
           const labelFi = criarCheckboxControle(t, 'finalizado', 'Finalizado', config, true);
 
+          ehfGarantirEstiloAlarmesML();
+
           if (timeInput) {
-            controls.appendChild(timeInput);
+            // v4.2.10: o prazo ML continua salvo internamente em t.time e alimentado pelo Mercado Livre,
+            // mas não é mais exibido/editado no painel. O operador vê e edita somente o horário do alarme.
+            const alarmWrap = document.createElement('span');
+            alarmWrap.className = 'cp-time-block alarm only-alarm';
+            const alarmLabel = document.createElement('small');
+            alarmLabel.textContent = 'Alarme';
+            const alarmInput = document.createElement('input');
+            alarmInput.type = 'text';
+            alarmInput.inputMode = 'numeric';
+            alarmInput.autocomplete = 'off';
+            alarmInput.placeholder = '--:--';
+            alarmInput.maxLength = 5;
+            // Manual em branco deve aparecer em branco; automático aparece calculado.
+            alarmInput.value = t.alarmManual ? (t.alarmTime || '') : getHorarioAlarmeTask(t);
+            alarmInput.id = `alarm-${t.id}`;
+            let alarmSaveTimer = null;
+
+            function salvarDigitacaoAlarme(renderDepois = false) {
+              const raw = alarmInput.value || '';
+              const parsed = normalizarHorarioDigitavel(raw);
+              if (!parsed.ok) {
+                alarmInput.classList.add('input-invalid');
+                return false;
+              }
+
+              alarmInput.classList.remove('input-invalid');
+              const valorFinal = parsed.value;
+              const mudou = (t.alarmTime || '') !== valorFinal || !t.alarmManual;
+              t.alarmTime = valorFinal;
+              t.alarmManual = true;
+              t.alarmFonte = valorFinal ? 'MANUAL' : 'MANUAL_VAZIO';
+              if (!valorFinal) t.alarmOffsetMinutes = 0;
+              limparAlarmeTask(t.id);
+
+              if (valorFinal && raw !== valorFinal && (raw.length >= 3 || renderDepois)) {
+                alarmInput.value = valorFinal;
+              }
+
+              if (mudou) {
+                pushStateToFirebase();
+                verificarAlarmesDePrazo();
+              }
+
+              return true;
+            }
+
+            alarmInput.addEventListener('input', () => {
+              const raw = alarmInput.value || '';
+
+              // Permite apagar e salvar vazio imediatamente.
+              if (!raw.trim()) {
+                if (alarmSaveTimer) clearTimeout(alarmSaveTimer);
+                alarmInput.classList.remove('input-invalid');
+                salvarDigitacaoAlarme(false);
+                return;
+              }
+
+              // Quando digita 930 ou 1530, salva automaticamente sem precisar sair do campo.
+              if (alarmSaveTimer) clearTimeout(alarmSaveTimer);
+              const onlyDigits = raw.replace(/\D/g, '');
+              const delay = onlyDigits.length >= 3 || raw.includes(':') ? 350 : 900;
+              alarmSaveTimer = setTimeout(() => salvarDigitacaoAlarme(false), delay);
+            });
+
+            alarmInput.addEventListener('blur', () => {
+              if (alarmSaveTimer) clearTimeout(alarmSaveTimer);
+              const ok = salvarDigitacaoAlarme(true);
+              if (ok) renderEstructuralHTML();
+            });
+
+            alarmInput.addEventListener('keydown', (ev) => {
+              if (ev.key === 'Enter') {
+                ev.preventDefault();
+                if (alarmSaveTimer) clearTimeout(alarmSaveTimer);
+                const ok = salvarDigitacaoAlarme(true);
+                if (ok) renderEstructuralHTML();
+              }
+            });
+            alarmWrap.appendChild(alarmLabel);
+            alarmWrap.appendChild(alarmInput);
+            controls.appendChild(alarmWrap);
+
+            const autoBtn = document.createElement('button');
+            autoBtn.type = 'button';
+            autoBtn.className = 'cp-auto-alarm-btn';
+            autoBtn.textContent = 'Auto -1h';
+            autoBtn.title = t.time ? `Usar uma hora antes do prazo do Mercado Livre (${t.time})` : 'Prazo Mercado Livre ainda não carregado';
+            autoBtn.disabled = !t.time;
+            autoBtn.addEventListener('click', () => {
+              t.alarmManual = false;
+              atualizarAlarmeAutomatico(t, true);
+              limparAlarmeTask(t.id);
+              renderEstructuralHTML();
+              pushStateToFirebase();
+              verificarAlarmesDePrazo();
+            });
+            controls.appendChild(autoBtn);
           } else if (timePlaceholder) {
             controls.appendChild(timePlaceholder);
           }
@@ -2158,6 +2837,8 @@
 
           li.appendChild(nameDiv);
           li.appendChild(controls);
+
+          // v4.2.10: removido texto lateral de prazo/alarme/manual para deixar cada linha limpa.
 
           ul.appendChild(li);
         });
@@ -2233,6 +2914,11 @@
         estadoParaSalvar.lojas[t.id] = {
           name: t.name,
           time: t.time || '',
+          alarmTime: t.alarmTime || '',
+          alarmManual: !!t.alarmManual,
+          deadlineManual: !!t.deadlineManual,
+          alarmOffsetMinutes: Number(t.alarmOffsetMinutes || ML_ALARM_OFFSET_MINUTES),
+          mlDeadlineTime: t.mlDeadlineTime || '',
           coletado: !!t.coletado,
           enviado: !!t.enviado,
           finalizado: !!t.finalizado,
@@ -2287,6 +2973,11 @@
             id: config.id,
             name: config.name,
             time: salvo ? (salvo.time || config.defaultTime || '') : (config.defaultTime || ''),
+            alarmTime: salvo ? (salvo.alarmManual ? (salvo.alarmTime || '') : (salvo.alarmTime || calcularAlarmeUmaHoraAntes(salvo.time || config.defaultTime || ''))) : calcularAlarmeUmaHoraAntes(config.defaultTime || ''),
+            alarmManual: salvo ? !!salvo.alarmManual : false,
+            deadlineManual: salvo ? !!salvo.deadlineManual : false,
+            alarmOffsetMinutes: salvo ? Number(salvo.alarmOffsetMinutes || ML_ALARM_OFFSET_MINUTES) : ML_ALARM_OFFSET_MINUTES,
+            mlDeadlineTime: salvo ? (salvo.mlDeadlineTime || '') : '',
             coletado: salvo ? !!salvo.coletado : false,
             enviado: salvo ? !!salvo.enviado : false,
             finalizado: salvo ? !!salvo.finalizado : false,
@@ -2351,8 +3042,7 @@ onValue(alertaBroadcastRef, (snapshot) => {
 
       localTasks.forEach(x => {
         if (!x.semHorario) {
-          x.time = t;
-          limparAlarmeTask(x.id);
+          aplicarHorarioLimiteTask(x, t, 'manual', { forceAlarm: false });
         }
       });
 
@@ -2379,7 +3069,7 @@ onValue(alertaBroadcastRef, (snapshot) => {
     };
   
 
-/* ========== V3.3 — HORÁRIOS E CONTAGEM EXATA DO MERCADO LIVRE ========== */
+/* ========== V3.3.1 — HORÁRIOS E CONTAGEM EXATA DO MERCADO LIVRE ========== */
 (function(){
   const esc=(value)=>String(value??'').replace(/[&<>"']/g,(char)=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':'&quot;',"'":"&#39;"}[char]));
   const base=String(window.EHF_API_BASE||'https://atendente-vesco-separacao.2cwhzy.easypanel.host').replace(/\/+$/,'');
@@ -2402,11 +3092,22 @@ onValue(alertaBroadcastRef, (snapshot) => {
     };
   }
 
+  function pickTodayMode(account, key){
+    const today=account?.enviosHoje||account?.today||account?.tabToday||account?.TAB_TODAY||{};
+    const direct=today?.[key]||today?.[key.toUpperCase?.()]||null;
+    return direct||account?.[key]||{};
+  }
+
   function renderAccount(account){
-    const flex=account.flex||{};
-    const coleta=account.coleta||{};
+    const flex=pickTodayMode(account,'flex');
+    const coleta=pickTodayMode(account,'coleta');
+    const entrega=pickTodayMode(account,'entregaPorConta');
+    const devolucoes=pickTodayMode(account,'devolucoes');
     const flexView=modeDisplay(flex);
     const coletaView=modeDisplay(coleta);
+    const entregaView=modeDisplay(entrega);
+    const devolucoesView=modeDisplay(devolucoes);
+    const hasExtra=(entregaView.verified&&Number(entrega.totalPackages||0)>0)||(devolucoesView.verified&&Number(devolucoes.totalPackages||0)>0);
     const complete=Boolean(account.complete&&flexView.verified&&coletaView.verified);
     const cutoff=fmtTime(account.cutoff);
     return `<article class="ml-account-card">
@@ -2415,6 +3116,7 @@ onValue(alertaBroadcastRef, (snapshot) => {
       <div class="ml-mode-grid">
         <div class="ml-mode"><label>Flex</label><b>${flexView.value}</b><em>${flexView.delayed} atrasado(s)</em>${flexView.verified?'':`<small class="ml-count-pending">contador pendente · ${flexView.observed} registro(s) lido(s)</small>`}</div>
         <div class="ml-mode"><label>Agência / Coleta</label><b>${coletaView.value}</b><em>${coletaView.delayed} atrasado(s)</em>${coletaView.verified?'':`<small class="ml-count-pending">contador pendente · ${coletaView.observed} registro(s) lido(s)</small>`}</div>
+        ${hasExtra?`<div class="ml-mode"><label>Entrega por sua conta</label><b>${entregaView.value}</b><em class="warn">${entregaView.delayed} pendência(s)</em></div><div class="ml-mode"><label>Devoluções</label><b>${devolucoesView.value}</b><em class="warn">${devolucoesView.delayed} pendência(s)</em></div>`:''}
       </div>
     </article>`;
   }
@@ -2463,6 +3165,9 @@ onValue(alertaBroadcastRef, (snapshot) => {
       const response=await fetch(base+'/api/mercadolivre/horarios?ts='+Date.now(),{cache:'no-store'});
       const data=await response.json();
       if(!response.ok||!data?.ok)throw new Error(data?.error||'Falha ao consultar horários.');
+      if (typeof window.ehfAplicarAlarmesDoMercadoLivre === 'function') {
+        window.ehfAplicarAlarmesDoMercadoLivre(data);
+      }
       root.innerHTML=(data.accounts||[]).filter(account=>account.configured).map(renderAccount).join('')||'<div class="ml-deadline-loading">Nenhuma conta do Mercado Livre configurada.</div>';
       const configured=(data.accounts||[]).filter(a=>a.configured);
       const exact=Boolean(data.complete)&&configured.length>0&&configured.every(a=>a.complete&&a.flex?.countVerified&&a.coleta?.countVerified);
