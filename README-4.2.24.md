@@ -1,13 +1,14 @@
-// firebase-config.js — VESCO CONTROL V10.22
-window.VESCO_FIREBASE_CONFIG = {
-  apiKey: "AIzaSyDvQhoV0x6B9cTnouzvOxyfqXRtsG2nKq0",
-  authDomain: "dashlogistica-49689.firebaseapp.com",
-  databaseURL: "https://dashlogistica-49689-default-rtdb.firebaseio.com",
-  projectId: "dashlogistica-49689",
-  storageBucket: "dashlogistica-49689.firebasestorage.app",
-  messagingSenderId: "833809141353",
-  appId: "1:833809141353:web:c92b18ee10d9fc91c29cf8",
-  measurementId: "G-NRYTBELTJ0"
-};
-window.VESCO_FIREBASE_DATABASE_URL = window.VESCO_FIREBASE_CONFIG.databaseURL;
-window.VESCO_RTDB_URL = window.VESCO_FIREBASE_CONFIG.databaseURL;
+# Dashboard EHF v4.2.24
+
+Correções desta versão:
+
+- Romaneio: abre a janela de impressão antes da chamada assíncrona ao finalizar, reduzindo bloqueio de pop-up.
+- Romaneio: adiciona botão interno "Imprimir romaneio" na própria página gerada.
+- Romaneio: fallback por iframe e download HTML caso o navegador bloqueie a nova janela.
+- Shopee: remove a segunda remessa de Shopee Envios.
+- Shopee: troca a antiga "SHOPEE ENVIO - REMESSA 1" por "SPX ENTREGA - 1ª REMESSA".
+- Shopee: mantém "SHOPEE ENVIO" como remessa única.
+- Cache dos módulos atualizado para ?v=4224.
+- site/ e dist/ sincronizados.
+
+Depois de subir no GitHub, fazer Redeploy no Vercel sem cache.

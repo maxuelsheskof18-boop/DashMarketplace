@@ -1,56 +1,168 @@
-(function(){
-  window.EHFModules=window.EHFModules||{};
-  const state={mounted:false,loaded:false,data:{pedidos:[]},timer:null,refreshTimer:null,selected:null};
-  const API_BASE=()=>String(localStorage.getItem('ehf_worker_api_base')||'https://atendente-vesco-separacao.2cwhzy.easypanel.host').replace(/\/+$/,'');
-  const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-  const norm=v=>String(v||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,'');
-  const qty=v=>{const n=Number(v||0);return Number.isInteger(n)?String(n):n.toLocaleString('pt-BR',{maximumFractionDigits:3})};
-  const $=id=>document.getElementById(id);
-  const STATUS={PENDENTE:'Pendente',EM_ANALISE:'Em análise',AGUARDANDO_ESTOQUE:'Aguardando estoque',AGUARDANDO_TRANSPORTADORA:'Aguardando transportadora',AGUARDANDO_CLIENTE:'Aguardando cliente',RESOLVIDO:'Resolvido'};
+// app.js — frontend do Dashboard de Separação
+// Usa proxy local (Node) em http://127.0.0.1:3001/api/summary por padrão.
+// Mantém JSONP como fallback para o Web App do Apps Script.
 
-  function injectStyles(){
-    if(document.getElementById('ehfm-solution-css'))return;
-    const style=document.createElement('style');style.id='ehfm-solution-css';style.textContent=`
-      .ehfm-late-reason{display:grid;grid-template-columns:minmax(150px,1fr) auto;gap:6px;align-items:center}.ehfm-late-reason input{min-width:150px;background:#080d14;border:1px solid #334155;color:#fff;border-radius:8px;padding:8px;font-size:11px}.ehfm-mini-btn{border:1px solid #475569;background:#172033;color:#fff;border-radius:8px;padding:7px 9px;font-size:10px;font-weight:900;cursor:pointer;white-space:nowrap}.ehfm-mini-btn.primary{background:#f77f00;border-color:#f77f00;color:#080808}.ehfm-mini-btn:disabled{opacity:.55;cursor:wait}.ehfm-solution-badge{display:inline-flex;padding:4px 8px;border-radius:999px;border:1px solid #475569;background:#172033;font-size:9px;font-weight:900}.ehfm-solution-badge.RESOLVIDO{background:#075e3b;border-color:#14b86e}.ehfm-solution-badge.EM_ANALISE{background:#5b3c00;border-color:#f59e0b}.ehfm-solution-badge.AGUARDANDO_ESTOQUE,.ehfm-solution-badge.AGUARDANDO_TRANSPORTADORA,.ehfm-solution-badge.AGUARDANDO_CLIENTE{background:#542020;border-color:#ef4444}.ehfm-product-missing{display:flex;flex-direction:column;gap:8px;align-items:flex-start}.ehfm-solution-modal{position:fixed;inset:0;background:rgba(0,0,0,.72);z-index:99999;display:none;align-items:center;justify-content:center;padding:18px}.ehfm-solution-modal.open{display:flex}.ehfm-solution-card{width:min(680px,96vw);background:#101824;border:1px solid #334155;border-radius:16px;padding:18px;box-shadow:0 30px 90px rgba(0,0,0,.55)}.ehfm-solution-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.ehfm-solution-field{display:flex;flex-direction:column;gap:6px}.ehfm-solution-field.full{grid-column:1/-1}.ehfm-solution-field label{font-size:10px;font-weight:900;color:#94a3b8;text-transform:uppercase}.ehfm-solution-field input,.ehfm-solution-field select,.ehfm-solution-field textarea{background:#080d14;border:1px solid #334155;color:#fff;border-radius:9px;padding:10px}.ehfm-solution-field textarea{min-height:110px;resize:vertical}.ehfm-solution-title{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;margin-bottom:15px}.ehfm-solution-title h3{margin:0}.ehfm-solving{opacity:.55;pointer-events:none}@media(max-width:760px){.ehfm-solution-grid{grid-template-columns:1fr}.ehfm-solution-field.full{grid-column:auto}}
-    `;document.head.appendChild(style);
+const PROXY_URL = 'http://127.0.0.1:3001/api/summary'; // <- ajuste se seu proxy estiver em outra porta
+const WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbzvgtteSSSEsJrR5WoYX6tymQYhuVKmWCkYTYVYWsaKzal9NuzJJZZSZoEbu_CFSVSm/exec';
+
+// JSONP helper (retained as fallback)
+function jsonpFetch(url, timeout = 8000) {
+  return new Promise((resolve, reject) => {
+    const cbName = 'jsonp_cb_' + Date.now() + '_' + Math.floor(Math.random() * 10000);
+    const script = document.createElement('script');
+    let timer;
+
+    window[cbName] = function(data) {
+      clearTimeout(timer);
+      cleanup();
+      resolve(data);
+    };
+
+    function cleanup() {
+      try { delete window[cbName]; } catch (e) {}
+      try { script.remove(); } catch (e) {}
+    }
+
+    script.src = url + (url.indexOf('?') === -1 ? '?' : '&') + 'callback=' + cbName;
+    script.onerror = function() {
+      clearTimeout(timer);
+      cleanup();
+      reject(new Error('JSONP script error'));
+    };
+
+    document.body.appendChild(script);
+
+    timer = setTimeout(() => {
+      cleanup();
+      reject(new Error('JSONP timeout'));
+    }, timeout);
+  });
+}
+
+/* fetchSummary por conta — usa PROXY se disponível, senão JSONP direto ao Web App */
+async function fetchSummary(account) {
+  // Tenta proxy primeiro (mais seguro e contorna CSP/JSONP)
+  if (typeof PROXY_URL === 'string' && PROXY_URL.trim()) {
+    try {
+      const url = `${PROXY_URL}/${encodeURIComponent(account.key)}`;
+      const resp = await fetch(url, { method: 'GET' });
+      if (!resp.ok) {
+        console.warn('fetchSummary: proxy returned', resp.status, await resp.text());
+        // fallback para JSONP abaixo
+      } else {
+        const json = await resp.json();
+        // Caso o proxy retorne normalized object (ok:true, aguardando, etc.)
+        if (json && json.ok && (('aguardando' in json) || json.perStore || json.overall)) {
+          // se veio perStore com a conta específica
+          if (json.perStore && json.perStore[account.key]) {
+            const ps = json.perStore[account.key];
+            return {
+              totalGeral: Number(ps.totalItens ?? ps.totalGeral ?? 0),
+              aguardando: Number(ps.aguardando ?? 0),
+              emSeparacao: Number(ps.emSeparacao ?? ps.em_separacao ?? 0),
+              separadas: Number(ps.separadas ?? 0),
+              embaladas: Number(ps.embaladas ?? 0)
+            };
+          }
+          // top-level normalized
+          return {
+            totalGeral: Number(json.overall?.totalItens ?? json.totalGeral ?? json.grandTotal ?? 0),
+            aguardando: Number(json.aguardando ?? 0),
+            emSeparacao: Number(json.emSeparacao ?? json.em_separacao ?? 0),
+            separadas: Number(json.separadas ?? 0),
+            embaladas: Number(json.embaladas ?? 0)
+          };
+        }
+        // Se proxy retornou formato WebApp (mapped/raw)
+        const mapped = json.mapped || json.raw || json;
+        return {
+          totalGeral: Number(mapped.grand_total ?? mapped.grandTotal ?? mapped.total ?? 0),
+          aguardando: Number(mapped.aguardando_total ?? mapped.aguardando ?? 0),
+          emSeparacao: Number(mapped.em_separao_total ?? mapped.em_separacao_total ?? mapped.emSeparacao ?? 0),
+          separadas: Number(mapped.separadas_total ?? mapped.separadas ?? 0),
+          embaladas: Number(mapped.embaladas_total ?? mapped.embaladas ?? 0)
+        };
+      }
+    } catch (err) {
+      console.warn('fetchSummary: erro no proxy', err);
+      // fallback JSONP continua abaixo
+    }
   }
 
-  function mount(){
-    if(state.mounted)return;state.mounted=true;injectStyles();
-    const root=$('ehf-atrasados-module');
-    root.innerHTML=`<section class="ehfm-page" id="ehfm-late-page">
-      <header class="ehfm-head"><div><h2>Pedidos atrasados</h2><p>Produtos do Tiny, motivo operacional e solução acompanhados no mesmo painel.</p></div><div class="ehfm-actions"><button class="ehfm-btn" id="ehfm-late-refresh">Recarregar</button><button class="ehfm-btn" id="ehfm-products-rebuild">Priorizar produtos</button><button class="ehfm-btn primary" id="ehfm-late-sync">Atualizar tudo</button></div></header>
-      <div id="ehfm-late-alert" class="ehfm-alert"></div>
-      <div class="ehfm-metrics"><div class="ehfm-metric"><span>Total atrasados</span><b id="ehfm-late-total">0</b></div><div class="ehfm-metric flex"><span>Flex</span><b id="ehfm-late-flex">0</b></div><div class="ehfm-metric coleta"><span>Agência / Coleta</span><b id="ehfm-late-coleta">0</b></div><div class="ehfm-metric"><span>Com produtos</span><b id="ehfm-late-with-products">0</b></div><div class="ehfm-metric"><span>Sem produtos</span><b id="ehfm-late-without-products">0</b></div></div>
-      <section class="ehfm-panel"><div class="ehfm-head"><div><h3 style="margin:0">Processamento dos produtos</h3><p id="ehfm-products-updated">Consultando o Easypanel...</p></div></div><div class="ehfm-process"><div class="ehfm-process-main"><b id="ehfm-products-stage">Base de produtos</b><small id="ehfm-products-detail">Carregando cobertura...</small><div class="ehfm-progress"><i id="ehfm-products-bar"></i></div><small id="ehfm-products-live">Aguardando</small></div><div class="ehfm-process-stat"><small>Separações ativas</small><strong id="ehfm-products-active">0</strong></div><div class="ehfm-process-stat"><small>Com produtos</small><strong id="ehfm-products-with">0</strong></div><div class="ehfm-process-stat"><small>Sem produtos</small><strong id="ehfm-products-without">0</strong></div><div class="ehfm-process-stat"><small>Linhas / unidades</small><strong id="ehfm-products-lines">0</strong><small id="ehfm-products-units">0 unidades</small></div></div></section>
-      <section class="ehfm-panel"><div class="ehfm-filters"><select class="ehfm-select" id="ehfm-late-modality"><option value="TODOS">Flex e Coleta</option><option value="FLEX">Somente Flex</option><option value="COLETA">Somente Agência/Coleta</option></select><select class="ehfm-select" id="ehfm-late-store"><option value="">Todas as lojas</option></select><input class="ehfm-input" id="ehfm-late-search" placeholder="Pesquisar pedido, etiqueta, SKU, produto, motivo ou responsável"></div></section>
-      <section class="ehfm-panel"><div class="ehfm-head"><div><h3 style="margin:0">Pedidos consultados</h3></div><b id="ehfm-late-count">0 pedidos</b></div><div class="ehfm-table-wrap"><table class="ehfm-table"><thead><tr><th>Modalidade</th><th>Loja / pedido</th><th>Etiqueta / envio</th><th>Produtos</th><th>Motivo</th><th>Painel de solução</th></tr></thead><tbody id="ehfm-late-rows"><tr><td colspan="6" class="ehfm-empty">Carregando...</td></tr></tbody></table></div></section>
-      <div class="ehfm-solution-modal" id="ehfm-solution-modal"><div class="ehfm-solution-card"><div class="ehfm-solution-title"><div><h3 id="ehfm-solution-title">Solução do pedido</h3><span class="ehfm-sub" id="ehfm-solution-sub"></span></div><button class="ehfm-mini-btn" id="ehfm-solution-close">Fechar</button></div><div class="ehfm-solution-grid"><div class="ehfm-solution-field full"><label>Motivo do atraso</label><input id="ehfm-solution-reason" placeholder="Ex.: produto não localizado, sem estoque, endereço..."></div><div class="ehfm-solution-field"><label>Status da solução</label><select id="ehfm-solution-status">${Object.entries(STATUS).map(([k,v])=>`<option value="${k}">${v}</option>`).join('')}</select></div><div class="ehfm-solution-field"><label>Responsável</label><input id="ehfm-solution-owner" placeholder="Nome do responsável"></div><div class="ehfm-solution-field full"><label>Observação / ação tomada</label><textarea id="ehfm-solution-note" placeholder="Descreva o que foi feito e o próximo passo"></textarea></div></div><div class="ehfm-actions" style="margin-top:16px;justify-content:flex-end"><button class="ehfm-btn success" id="ehfm-solution-resolve">Marcar como resolvido</button><button class="ehfm-btn primary" id="ehfm-solution-save">Salvar solução</button></div></div></div>
-    </section>`;
-    $('ehfm-late-refresh').onclick=()=>load();$('ehfm-late-sync').onclick=syncAll;$('ehfm-products-rebuild').onclick=prioritizeProducts;
-    ['ehfm-late-modality','ehfm-late-store'].forEach(id=>$(id).onchange=renderRows);$('ehfm-late-search').oninput=renderRows;
-    $('ehfm-late-rows').addEventListener('click',handleTableClick);$('ehfm-solution-close').onclick=closeSolution;$('ehfm-solution-save').onclick=()=>saveModal(false);$('ehfm-solution-resolve').onclick=()=>saveModal(true);$('ehfm-solution-modal').onclick=e=>{if(e.target===$('ehfm-solution-modal'))closeSolution()};
+  // Fallback JSONP -> chama Web App diretamente (pode falhar por CSP)
+  try {
+    const url = `${WEB_APP_URL}?action=account&acc=${encodeURIComponent(account.key)}`;
+    const json = await jsonpFetch(url, 10000);
+    if (!json || json.error) {
+      console.warn('fetchSummary: erro na resposta JSONP para', account.key, json && json.error);
+      return { totalGeral: 0, aguardando: 0, emSeparacao: 0, separadas: 0, embaladas: 0 };
+    }
+    return {
+      totalGeral: Number(json.total || json.grandTotal || 0),
+      aguardando: Number(json.aguardando || 0),
+      emSeparacao: Number(json.emSeparacao || json['emSeparacao'] || 0),
+      separadas: Number(json.separadas || 0),
+      embaladas: Number(json.embaladas || 0)
+    };
+  } catch (err) {
+    console.error('Erro fetchSummary JSONP', account.key, err);
+    return { totalGeral: 0, aguardando: 0, emSeparacao: 0, separadas: 0, embaladas: 0 };
   }
-  function alert(text,type=''){const el=$('ehfm-late-alert');if(!el)return;el.textContent=text||'';el.className='ehfm-alert'+(text?' show':'')+(type==='ok'?' ok':'');}
-  async function api(path,options={}){const r=await fetch(API_BASE()+path,{cache:'no-store',...options,headers:{Accept:'application/json',...(options.body?{'Content-Type':'application/json'}:{}),...(options.headers||{})}});const d=await r.json().catch(()=>({}));if(!r.ok||d.ok===false){const e=new Error(d.message||d.error||`HTTP ${r.status}`);e.data=d;throw e}return d}
-  function markerNames(p){return(p.marcadores||[]).map(m=>{if(typeof m==='string')return m;const x=m?.marcador||m?.marker||m||{};return x.description||x.descricao||x.nome||x.name||''}).filter(Boolean)}
-  function automaticReason(p){const names=markerNames(p),s=norm(names.join(' '));if(/naotem|estaprachegar/.test(s))return'Sem estoque / aguardando';if(/naoachou/.test(s))return'Produto não localizado';if(/conflitodeendereco|naoestaimprimindo|pacotequedeubo|verificar|bo/.test(s))return'Problema operacional';if(/naomandar|naoenviar|cancelado|prejuizo/.test(s))return'Bloqueado / não enviar';return names.length?names.join(', '):''}
-  function effectiveReason(p){return String(p.motivoManual||p.motivoEfetivo||'').trim()||automaticReason(p)||'Sem motivo informado'}
-  function normalizeData(data){const pedidos=Array.isArray(data?.pedidos)?data.pedidos:Array.isArray(data?.orders)?data.orders:[];return{...data,pedidos}}
-  function populateStores(){const sel=$('ehfm-late-store'),current=sel.value,map=new Map(state.data.pedidos.map(p=>[p.conta,p.lojaNome||p.conta]));sel.innerHTML='<option value="">Todas as lojas</option>'+[...map].map(([k,v])=>`<option value="${esc(k)}">${esc(v)}</option>`).join('');sel.value=current}
-  function matches(p){const m=$('ehfm-late-modality').value,s=$('ehfm-late-store').value,q=norm($('ehfm-late-search').value);if(m!=='TODOS'&&String(p.modalidadeCodigo||'').toUpperCase()!==m)return false;if(s&&p.conta!==s)return false;if(q){const hay=norm([p.orderId,p.pedidoTiny,p.separacaoId,p.cliente,p.modalidade,p.mensagem,p.marcadoresTexto,effectiveReason(p),p.solucaoResponsavel,p.solucaoObservacao,...(p.shipmentIds||[]),...(p.packIds||[]),...(p.logisticCodes||[]),...(p.itens||[]).flatMap(i=>[i.codigo,i.descricao])].join(' '));if(!hay.includes(q))return false}return true}
-  function renderRows(){const rows=state.data.pedidos.filter(matches);$('ehfm-late-count').textContent=`${rows.length} pedido${rows.length===1?'':'s'}`;$('ehfm-late-rows').innerHTML=rows.length?rows.map(p=>{const modality=String(p.modalidadeCodigo||'').toUpperCase(),items=Array.isArray(p.itens)?p.itens:[],units=p.totalUnidades??items.reduce((a,i)=>a+Number(i.quantidade||0),0),codes=[...(p.shipmentIds||[]),...(p.packIds||[]),...(p.logisticCodes||[])].filter(Boolean),ml=[...(p.pedidosMarketplace||[]),p.orderId].filter(Boolean),status=String(p.solucaoStatus||'PENDENTE').toUpperCase();const products=items.length?items.slice(0,12).map(i=>`<div><strong>${esc(qty(i.quantidade))}×</strong> ${esc(i.descricao||'Produto')}<span class="ehfm-sub">${esc(i.codigo||'SEM SKU')}</span></div>`).join(''):`<div class="ehfm-product-missing"><span class="ehfm-sub">Produtos ainda não associados ao Tiny</span><button class="ehfm-mini-btn primary" data-action="resolve-products" data-id="${p.id}">Buscar produtos agora</button></div>`;return `<tr data-late-id="${p.id}"><td><span class="ehfm-badge ${modality==='FLEX'?'flex':'coleta'}">${esc(modality||'N/D')}</span><span class="ehfm-sub">${esc(p.modalidade||'')}</span></td><td><b>${esc(p.lojaNome||p.conta||'')}</b><span class="ehfm-sub">ML ${esc([...new Set(ml)].join(' · ')||'--')}</span><span class="ehfm-sub">Tiny ${esc(p.pedidoTiny||'--')} · Separação ${esc(p.separacaoId||'--')}</span></td><td><b>${esc([...new Set(codes)].join(' · ')||'Sem código logístico')}</b><span class="ehfm-sub">${esc(p.mensagem||'')}</span></td><td class="ehfm-products">${products}${items.length?`<span class="ehfm-sub">${items.length} linha(s) · ${qty(units)} unidade(s)</span>`:''}</td><td><div class="ehfm-late-reason"><input data-reason-input="${p.id}" value="${esc(effectiveReason(p)==='Sem motivo informado'?'':effectiveReason(p))}" placeholder="Adicionar motivo"><button class="ehfm-mini-btn" data-action="save-reason" data-id="${p.id}">Salvar</button></div><span class="ehfm-sub">Marcadores: ${esc(markerNames(p).join(', ')||'nenhum')}</span></td><td><span class="ehfm-solution-badge ${esc(status)}">${esc(STATUS[status]||status)}</span><span class="ehfm-sub">${esc(p.solucaoResponsavel?`Responsável: ${p.solucaoResponsavel}`:'Sem responsável')}</span><span class="ehfm-sub">${esc(p.solucaoObservacao||'Nenhuma ação registrada')}</span><button class="ehfm-mini-btn primary" data-action="open-solution" data-id="${p.id}" style="margin-top:7px">Abrir solução</button></td></tr>`}).join(''):'<tr><td colspan="6" class="ehfm-empty">Nenhum pedido corresponde aos filtros.</td></tr>'}
-  function render(){const d=state.data,pedidos=d.pedidos||[],flex=Number(d.totalFlex??pedidos.filter(p=>p.modalidadeCodigo==='FLEX').length),coleta=Number(d.totalColeta??pedidos.filter(p=>p.modalidadeCodigo==='COLETA').length),withP=pedidos.filter(p=>(p.itens||[]).length).length;$('ehfm-late-total').textContent=d.atrasados??d.total??pedidos.length;$('ehfm-late-flex').textContent=flex;$('ehfm-late-coleta').textContent=coleta;$('ehfm-late-with-products').textContent=withP;$('ehfm-late-without-products').textContent=Math.max(0,pedidos.length-withP);populateStores();renderRows()}
-  function renderStatus(data){const cov=data.productCoverage||data.coverage||data.workerHealth?.productCoverage||{},proc=data.productProcessing||data.processing||{},stats=data.stats||data.workerHealth?.stats||{},active=Number(cov.activeSeparations||stats.coverage?.active||0),withP=Number(cov.activeWithProducts||stats.coverage?.enriched||0),without=Number(cov.activeWithoutProducts||stats.coverage?.pending||0),running=Boolean(data.running?.products||data.running?.enrich||data.running?.summary||proc.status==='RUNNING'),percent=Number(proc.percentage??(active?Math.round(withP/active*100):0));$('ehfm-products-active').textContent=active;$('ehfm-products-with').textContent=withP;$('ehfm-products-without').textContent=without;$('ehfm-products-lines').textContent=stats.order_items||stats.orderItems||proc.itemLines||0;$('ehfm-products-units').textContent=`${qty(stats.orderUnits||0)} unidades indexadas`;$('ehfm-products-stage').textContent=running?'Worker enriquecendo pedidos':without?'Cobertura parcial':'Produtos concluídos';$('ehfm-products-detail').textContent=`${withP} de ${active} separações com produtos`;$('ehfm-products-live').textContent=running?'Processando automaticamente':without?'Fila automática aguardando':'Concluído';$('ehfm-products-bar').style.width=`${Math.max(0,Math.min(100,percent))}%`;$('ehfm-products-updated').textContent=data.autoJobsEnabled===false?'Atenção: processamento automático do Worker está desligado':'Pedidos atrasados recebem prioridade operacional';if(running&&!state.timer)state.timer=setInterval(loadStatus,5000);if(!running&&state.timer){clearInterval(state.timer);state.timer=null}}
-  async function handleTableClick(e){const button=e.target.closest('button[data-action]');if(!button)return;const id=Number(button.dataset.id),action=button.dataset.action,p=state.data.pedidos.find(row=>Number(row.id)===id);if(!p)return;if(action==='open-solution')return openSolution(p);if(action==='save-reason'){const input=document.querySelector(`[data-reason-input="${id}"]`);button.disabled=true;try{await saveSolution(p,{motivo:input?.value||'',status:p.solucaoStatus||'PENDENTE',responsavel:p.solucaoResponsavel||'',observacao:p.solucaoObservacao||''});alert('Motivo salvo.','ok')}catch(err){alert(err.message)}finally{button.disabled=false}}if(action==='resolve-products'){button.disabled=true;button.textContent='Buscando...';try{const d=await api('/api/pedidos-atrasados/produtos/resolver',{method:'POST',body:JSON.stringify({id})});if(d.pedidoAtrasado){const idx=state.data.pedidos.findIndex(row=>Number(row.id)===id);if(idx>=0)state.data.pedidos[idx]=d.pedidoAtrasado}await load(true);alert('Produtos vinculados ao pedido.','ok')}catch(err){alert(err.message)}finally{button.disabled=false;button.textContent='Buscar produtos agora'}}}
-  function openSolution(p){state.selected=p;$('ehfm-solution-title').textContent=`Solução — ${p.lojaNome||p.conta}`;$('ehfm-solution-sub').textContent=`Pedido ML ${p.orderId||'--'} · Tiny ${p.pedidoTiny||'--'}`;$('ehfm-solution-reason').value=effectiveReason(p)==='Sem motivo informado'?'':effectiveReason(p);$('ehfm-solution-status').value=p.solucaoStatus||'PENDENTE';$('ehfm-solution-owner').value=p.solucaoResponsavel||localStorage.getItem('ehf_operador')||'';$('ehfm-solution-note').value=p.solucaoObservacao||'';$('ehfm-solution-modal').classList.add('open')}
-  function closeSolution(){$('ehfm-solution-modal')?.classList.remove('open');state.selected=null}
-  async function saveSolution(p,fields){const d=await api('/api/pedidos-atrasados/solucao',{method:'POST',body:JSON.stringify({id:p.id,...fields})});const idx=state.data.pedidos.findIndex(row=>Number(row.id)===Number(p.id));if(idx>=0&&d.pedido)state.data.pedidos[idx]=d.pedido;render();return d}
-  async function saveModal(resolved){if(!state.selected)return;const card=$('ehfm-solution-modal').querySelector('.ehfm-solution-card');card.classList.add('ehfm-solving');try{await saveSolution(state.selected,{motivo:$('ehfm-solution-reason').value,status:resolved?'RESOLVIDO':$('ehfm-solution-status').value,responsavel:$('ehfm-solution-owner').value,observacao:$('ehfm-solution-note').value});alert(resolved?'Pedido marcado como resolvido.':'Solução salva.','ok');closeSolution()}catch(err){alert(err.message)}finally{card.classList.remove('ehfm-solving')}}
-  async function loadStatus(){try{renderStatus(await api('/api/sync/status'))}catch(_){}}
-  async function load(silent=false){mount();const page=$('ehfm-late-page');if(!silent){page.setAttribute('aria-busy','true');alert('')}try{state.data=normalizeData(await api('/api/pedidos-atrasados?limit=5000'));state.loaded=true;render();await loadStatus()}catch(e){if(!silent){alert(e.message);$('ehfm-late-rows').innerHTML='<tr><td colspan="6" class="ehfm-empty">Falha ao carregar os pedidos atrasados.</td></tr>'}}finally{if(!silent)page.removeAttribute('aria-busy')}}
-  async function syncAll(){const b=$('ehfm-late-sync');b.disabled=true;alert('Atualização completa iniciada.','ok');try{await api('/api/sync/all',{method:'POST'});await loadStatus();setTimeout(load,4500)}catch(e){alert(e.message)}finally{b.disabled=false}}
-  async function prioritizeProducts(){const b=$('ehfm-products-rebuild');b.disabled=true;b.textContent='Priorizando...';try{const d=await api('/api/pedidos-atrasados/produtos/priorizar',{method:'POST',body:'{}'});alert(`${d.total||0} pedido(s) enviados para a fila prioritária. Os produtos aparecerão automaticamente.`,'ok');await loadStatus();setTimeout(()=>load(true),6000)}catch(e){alert(e.message)}finally{b.disabled=false;b.textContent='Priorizar produtos'}}
-  function activate(){mount();if(!state.loaded)load();else{render();loadStatus()}if(!state.refreshTimer)state.refreshTimer=setInterval(()=>load(true),20000)}
-  window.EHFModules.atrasados={activate,refresh:load};document.addEventListener('DOMContentLoaded',mount);
-})();
+}
+
+/* sync principal — usa fetchSummary para cada conta */
+async function sync() {
+  const btn = document.getElementById('btn-refresh');
+  if (btn) { btn.textContent = 'Sincronizando...'; btn.disabled = true; }
+
+  // expectativa: CONFIG.ACCOUNTS existe e é um array de { key, label } (mantido pelo seu app)
+  if (!window.CONFIG || !Array.isArray(window.CONFIG.ACCOUNTS)) {
+    console.error('CONFIG.ACCOUNTS não definido. Verifique onde CONFIG é carregado.');
+    if (btn) { btn.textContent = 'Sincronizar Tiny'; btn.disabled = false; }
+    return;
+  }
+
+  let totals = { aguardando: 0, emSeparacao: 0, separadas: 0, embaladas: 0 };
+
+  const promises = window.CONFIG.ACCOUNTS.map(acc => fetchSummary(acc).then(r => ({ acc, r })).catch(e => ({ acc, r: null })));
+  const results = await Promise.all(promises);
+
+  results.forEach(res => {
+    const r = res.r;
+    if (!r) return;
+    totals.aguardando += r.aguardando || 0;
+    totals.emSeparacao += r.emSeparacao || 0;
+    totals.separadas += r.separadas || 0;
+    totals.embaladas += r.embaladas || 0;
+  });
+
+  // atualiza estado e UI (supondo funções/variáveis globais já existentes no app)
+  window.globalState = window.globalState || {};
+  window.globalState.totalAseparar = totals.aguardando;
+  window.globalState.totalEmSeparacao = totals.emSeparacao;
+  window.globalState.totalSeparadas = totals.separadas;
+  window.globalState.totalEmbaladas = totals.embaladas;
+
+  // updateUI() deve existir no seu projeto (mantive a chamada)
+  if (typeof updateUI === 'function') {
+    updateUI();
+  } else {
+    // fallback simples: atualiza alguns elementos se existirem
+    const setText = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
+    setText('total-a-separar', totals.aguardando);
+    setText('total-em-separacao', totals.emSeparacao);
+    setText('total-separadas', totals.separadas);
+    setText('total-embaladas', totals.embaladas);
+  }
+
+  if (btn) { btn.textContent = 'Sincronizar Tiny'; btn.disabled = false; }
+}
+
+/* Inicialização: wire up botão e auto-sync opcional */
+document.addEventListener('DOMContentLoaded', () => {
+  const btn = document.getElementById('btn-refresh');
+  if (btn) btn.addEventListener('click', () => sync());
+
+  // Se quiser auto-sync ao carregar, descomente:
+  // sync();
+});
