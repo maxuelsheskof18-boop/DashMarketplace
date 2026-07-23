@@ -1,1 +1,2 @@
-<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>EHF Operação</title><script>location.replace(new URL('index.html#painel',document.baseURI).href)</script></head><body></body></html>
+<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta http-equiv="refresh" content="0;url=index.html#atrasados"><script>location.replace('index.html#atrasados')</script><meta name="vesco-version" content="4.2.1-PAINEL-PRODUCAO-FLUTUANTE-RESTAURADO">
+  <title>Pedidos atrasados — EHF</title></head><body></body></html>
