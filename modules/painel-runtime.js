@@ -1,4 +1,4 @@
-window.EHF_PANEL_RUNTIME_VERSION='4.2.33-ROMANEIO-MOBILE-PC-CLEAN';
+window.EHF_PANEL_RUNTIME_VERSION='4.2.39-ROMANEIO-MINIMIZAR';
 (function(){
   if (document.getElementById('ehf-bip-history-action-css')) return;
   const st = document.createElement('style');
@@ -1220,9 +1220,11 @@ window.EHF_PANEL_RUNTIME_VERSION='4.2.33-ROMANEIO-MOBILE-PC-CLEAN';
           produtos: products || '',
           unidades: Number(scan.total_units || 0),
           status: scan.status || (String(scan.channel_match || '').toLowerCase() === 'false' ? 'Canal divergente' : 'Conferido'),
-          observacao: scan.note || '',
+          observacao: [scan.horario || scan.horarioCompleto || '', scan.note || ''].filter(Boolean).join(' | '),
           operador: scan.operator || '',
-          source: scan.source || ''
+          plataforma: scan.plataforma || scan.platform || scan.marketplace || '',
+          horario: scan.horario || scan.horarioCompleto || '',
+          source: scan.plataforma || scan.platform || scan.marketplace || scan.source || ''
         };
       });
       return { rows, counts };

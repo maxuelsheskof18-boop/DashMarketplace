@@ -1,13 +1,13 @@
-# DashMarketplace v4.2.35 - Mobile com navegação completa
+# DashMarketplace EHF v4.2.39
 
-Versão ajustada para GitHub Pages.
+Versão com romaneio salvo, impressão de resumo/lista completa e botão Minimizar/Expandir na área de Romaneios salvos.
 
-Principais ajustes:
-- Mobile de bipagem limpo mantido.
-- Navegação global mobile adicionada no rodapé.
-- Acesso rápido a Painel, Bipagem, Embalagem, Atrasos e Menu.
-- Menu mobile com Logística, Motorista, Admin, Painel completo e Conferência.
-- Botão para abrir versão completa quando precisar.
-- Câmera mobile preservada para Android/iOS.
+## Publicação no GitHub Pages
 
-Suba o conteúdo desta pasta na raiz do repositório DashMarketplace.
+Suba o conteúdo desta pasta na raiz do repositório `DashMarketplace`.
+
+Teste:
+https://maxuelsheskof18-boop.github.io/DashMarketplace/#bipagem?v=4239
+
+Console:
+window.EHF_ROMANEIO_MOBILE_PC_VERSION

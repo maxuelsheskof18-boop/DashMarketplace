@@ -1,4 +1,4 @@
-window.EHF_MOBILE_CLEAN_BIPAGEM_VERSION='4.2.35-MOBILE-NAV-CLEAN';
+window.EHF_MOBILE_CLEAN_BIPAGEM_VERSION='4.2.37-MOBILE-ROMANEIO-JSONP';
 (function(){
   'use strict';
   const VERSION = window.EHF_MOBILE_CLEAN_BIPAGEM_VERSION;
@@ -40,6 +40,7 @@ window.EHF_MOBILE_CLEAN_BIPAGEM_VERSION='4.2.35-MOBILE-NAV-CLEAN';
         .ehf-mob-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px}.ehf-mob-btn{border:0;border-radius:14px;min-height:48px;padding:10px 9px;font-size:13px;font-weight:950;cursor:pointer;background:#162235;color:#fff;box-shadow:0 8px 20px rgba(0,0,0,.18)}.ehf-mob-btn.primary{background:#0ea5e9;color:#001018}.ehf-mob-btn.orange{background:#ff8a00;color:#111827}.ehf-mob-btn.green{background:#22c55e;color:#04130a}.ehf-mob-btn.red{background:#991b1b;color:#fff}.ehf-mob-btn.full{grid-column:1/-1}.ehf-mob-btn:active{transform:scale(.99)}
         .ehf-mob-scan{display:grid;grid-template-columns:1fr;gap:8px}.ehf-mob-scan input{width:100%;box-sizing:border-box;background:#02050a;color:#fff;border:2px solid rgba(255,138,0,.72);border-radius:16px;min-height:58px;padding:10px 12px;text-align:center;font-size:20px;font-weight:950;outline:none}.ehf-mob-scan input:focus{border-color:#0ea5e9;box-shadow:0 0 0 3px rgba(14,165,233,.17)}
         .ehf-mob-kpis{display:grid;grid-template-columns:1fr 1fr;gap:8px}.ehf-mob-kpi{background:#0b1320;border:1px solid rgba(255,255,255,.08);border-radius:14px;padding:10px}.ehf-mob-kpi span{display:block;font-size:9px;color:#7b8796;text-transform:uppercase;font-weight:900}.ehf-mob-kpi b{display:block;font-size:24px;color:#fff;line-height:1.1;margin-top:3px}.ehf-mob-kpi.green b{color:#22c55e}.ehf-mob-kpi.blue b{color:#38bdf8}.ehf-mob-kpi.red b{color:#fb7185}
+        .ehf-mob-rom-summary{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:8px 0}.ehf-mob-rom-summary .box{background:#07101b;border:1px solid rgba(255,255,255,.08);border-radius:12px;padding:9px}.ehf-mob-rom-summary .box span{display:block;color:#7b8796;font-size:9px;font-weight:900;text-transform:uppercase}.ehf-mob-rom-summary .box b{display:block;color:#fff;font-size:19px;margin-top:2px}.ehf-mob-rom-summary .box.warn b{color:#fb7185}.ehf-mob-last-code{background:#07101b;border:1px dashed rgba(255,255,255,.14);border-radius:12px;padding:9px;margin:8px 0;color:#94a3b8;font-size:10px}.ehf-mob-last-code b{display:block;color:#fff;font-size:12px;margin-top:3px;word-break:break-all}.ehf-mob-details-toggle{width:100%;margin-top:8px;min-height:40px;border-radius:12px;border:1px solid rgba(255,138,0,.38);background:rgba(255,138,0,.10);color:#ffb35c;font-size:11px;font-weight:950}.ehf-mob-details-wrap{display:grid;gap:8px;margin-top:8px}
         .ehf-mob-list-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px}.ehf-mob-list-head h2{margin:0!important}.ehf-mob-list{display:grid;gap:8px}.ehf-mob-empty{border:1px dashed rgba(255,255,255,.16);border-radius:14px;padding:16px;text-align:center;color:#94a3b8;font-size:11px;background:#07101b}.ehf-mob-read{display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center;border:1px solid rgba(255,255,255,.08);background:#07101b;border-radius:14px;padding:10px}.ehf-mob-read-code{font-size:13px;font-weight:950;color:#fff;overflow:hidden;text-overflow:ellipsis}.ehf-mob-read-meta{font-size:10px;color:#94a3b8;margin-top:3px;line-height:1.35}.ehf-mob-status{display:inline-flex;border-radius:999px;padding:3px 7px;font-size:9px;font-weight:950;margin-top:5px;background:rgba(34,197,94,.12);color:#86efac;border:1px solid rgba(34,197,94,.3)}.ehf-mob-status.bad{background:rgba(239,68,68,.12);color:#fecaca;border-color:rgba(239,68,68,.28)}.ehf-mob-remove{border:1px solid rgba(239,68,68,.42);background:rgba(239,68,68,.12);color:#fecaca;border-radius:10px;padding:8px 9px;font-size:10px;font-weight:900;min-width:74px}
         .ehf-mob-saved{display:grid;gap:8px}.ehf-mob-saved .ehf-romaneios-panel{display:block!important;margin:0!important;padding:0!important;border:0!important;background:transparent!important;box-shadow:none!important}.ehf-mob-saved .ehf-romaneios-head{display:flex!important;flex-direction:column!important;align-items:stretch!important;gap:8px!important}.ehf-mob-saved .ehf-romaneios-head h3{font-size:13px!important}.ehf-mob-saved .ehf-romaneios-head small{font-size:10px!important}.ehf-mob-saved .ehf-romaneio-actions{display:grid!important;grid-template-columns:1fr 1fr!important;gap:8px!important;width:100%!important}.ehf-mob-saved .ehf-romaneio-month{grid-column:1/-1!important;width:100%!important;box-sizing:border-box!important;min-height:42px!important}.ehf-mob-saved .ehf-romaneios-list{display:grid!important;gap:8px!important}.ehf-mob-saved .ehf-romaneio-item{grid-template-columns:1fr!important;padding:10px!important}.ehf-mob-saved .ehf-romaneio-print{display:grid!important;grid-template-columns:1fr 1fr!important;gap:8px!important;justify-content:stretch!important}.ehf-mob-saved .ehf-romaneio-btn{min-height:40px!important;font-size:11px!important}
         .ehf-mob-hidden-input{position:absolute!important;left:-9999px!important;top:-9999px!important;width:1px!important;height:1px!important;opacity:0!important;pointer-events:none!important}
@@ -70,7 +71,7 @@ window.EHF_MOBILE_CLEAN_BIPAGEM_VERSION='4.2.35-MOBILE-NAV-CLEAN';
     shell.id='ehf-mobile-clean-shell';
     shell.innerHTML = `
       <div class="ehf-mob-top">
-        <div class="ehf-mob-title"><h1>Bipagem <b>EHF</b></h1><span class="ehf-mob-version">v4.2.35</span></div>
+        <div class="ehf-mob-title"><h1>Bipagem <b>EHF</b></h1><span class="ehf-mob-version">v4.2.36</span></div>
         <div class="ehf-mob-pill-row">
           <span class="ehf-mob-pill">Operador: <strong id="ehf-mob-op">-</strong></span>
           <span class="ehf-mob-pill">Data: <strong id="ehf-mob-date">--/--</strong></span>
@@ -111,7 +112,7 @@ window.EHF_MOBILE_CLEAN_BIPAGEM_VERSION='4.2.35-MOBILE-NAV-CLEAN';
       </section>
 
       <section class="ehf-mob-card">
-        <div class="ehf-mob-list-head"><h2>Leituras do romaneio</h2><button type="button" class="ehf-mob-btn" id="ehf-mob-refresh" style="min-height:34px;padding:6px 9px;font-size:10px">Atualizar</button></div>
+        <div class="ehf-mob-list-head"><h2>Resumo do romaneio</h2><button type="button" class="ehf-mob-btn" id="ehf-mob-refresh" style="min-height:34px;padding:6px 9px;font-size:10px">Atualizar</button></div>
         <div id="ehf-mob-leituras" class="ehf-mob-list"><div class="ehf-mob-empty">Nenhuma leitura ainda.</div></div>
       </section>
 
@@ -185,8 +186,31 @@ window.EHF_MOBILE_CLEAN_BIPAGEM_VERSION='4.2.35-MOBILE-NAV-CLEAN';
     const box=document.getElementById('ehf-mob-leituras'); if(!box) return;
     const rows=$$('#lista-bipagens-historico tr').filter(tr => tr.offsetParent !== null || tr.textContent.trim());
     const scans=rows.map(rowToObj).filter(r=>r.codigo);
-    if(!scans.length){ box.innerHTML='<div class="ehf-mob-empty">Nenhuma leitura ainda.</div>'; return; }
-    box.innerHTML=scans.slice(0,80).map((r,i)=>`
+    if(!scans.length){
+      box.innerHTML='<div class="ehf-mob-empty">Nenhuma leitura ainda.</div>';
+      return;
+    }
+
+    const total=scans.length;
+    const divergentes=scans.filter(r=>/diverg|nao|não|erro|bloq|canal/i.test((r.status||'')+' '+(r.obs||''))).length;
+    const identificados=Math.max(0,total-divergentes);
+    const lojas=new Set(scans.map(r=>r.loja).filter(Boolean));
+    const canais=new Set(scans.map(r=>r.canal || r.plataforma).filter(Boolean));
+    const ultimo=scans[0] || scans[scans.length-1] || {};
+    const showDetails=!!window.__ehfMobShowReadDetails;
+
+    const summaryHtml = `
+      <div class="ehf-mob-rom-summary">
+        <div class="box"><span>Leituras</span><b>${total}</b></div>
+        <div class="box"><span>Identificados</span><b>${identificados}</b></div>
+        <div class="box warn"><span>Divergentes</span><b>${divergentes}</b></div>
+        <div class="box"><span>Lojas/Canais</span><b>${lojas.size}/${canais.size}</b></div>
+      </div>
+      <div class="ehf-mob-last-code">Última leitura<b>${esc(ultimo.codigo || '--')}</b></div>
+      <button type="button" class="ehf-mob-details-toggle" id="ehf-mob-toggle-details">${showDetails ? 'Ocultar leituras' : 'Ver / remover leituras'}</button>
+    `;
+
+    const detailsHtml = showDetails ? `<div class="ehf-mob-details-wrap">${scans.slice(0,80).map((r,i)=>`
       <div class="ehf-mob-read" data-i="${i}">
         <div>
           <div class="ehf-mob-read-code">${esc(r.codigo)}</div>
@@ -195,7 +219,13 @@ window.EHF_MOBILE_CLEAN_BIPAGEM_VERSION='4.2.35-MOBILE-NAV-CLEAN';
           <span class="ehf-mob-status ${/diverg|nao|não|erro|bloq/i.test(r.status) ? 'bad' : ''}">${esc(r.status || 'Registrado')}</span>
         </div>
         <button type="button" class="ehf-mob-remove" data-remove-i="${i}">Remover</button>
-      </div>`).join('');
+      </div>`).join('')}</div>` : '';
+
+    box.innerHTML = summaryHtml + detailsHtml;
+    box.querySelector('#ehf-mob-toggle-details')?.addEventListener('click',()=>{
+      window.__ehfMobShowReadDetails = !window.__ehfMobShowReadDetails;
+      renderMobileHistory();
+    });
     box.querySelectorAll('[data-remove-i]').forEach(b=>{
       b.onclick=()=>{ const idx=Number(b.dataset.removeI); scans[idx]?.button?.click?.(); setTimeout(updateShell,650); };
     });
