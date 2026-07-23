@@ -1,4 +1,4 @@
-window.EHF_PANEL_RUNTIME_VERSION='4.2.31-DASHMARKETPLACE-GHPAGES';
+window.EHF_PANEL_RUNTIME_VERSION='4.2.33-ROMANEIO-MOBILE-PC-CLEAN';
 (function(){
   if (document.getElementById('ehf-bip-history-action-css')) return;
   const st = document.createElement('style');
@@ -1089,6 +1089,7 @@ window.EHF_PANEL_RUNTIME_VERSION='4.2.31-DASHMARKETPLACE-GHPAGES';
         await set(ref(db, diaPath('bipagens_dia') + '/' + key), null);
         ehfDesmarcarCodigoBipadoLocal(codigo);
         ehfBipToast('Leitura removida do romaneio. Agora a etiqueta pode ser bipada novamente.');
+        ehfAgendarAutosaveRomaneio('remocao');
       } catch (e) {
         console.warn('Falha ao remover leitura:', e);
         ehfBipToast('Não consegui remover esta leitura.', true);
@@ -1288,6 +1289,40 @@ window.EHF_PANEL_RUNTIME_VERSION='4.2.31-DASHMARKETPLACE-GHPAGES';
       }
     }
     window.ehfRegistrarRomaneioPlanilha = ehfRegistrarRomaneioPlanilha;
+
+    let ehfRomaneioAutosaveTimer = null;
+    function ehfAgendarAutosaveRomaneio(reason) {
+      if (!ehfBipSession?.session?.id || ehfBipSession.session.status !== 'ABERTA') return;
+      clearTimeout(ehfRomaneioAutosaveTimer);
+      ehfRomaneioAutosaveTimer = setTimeout(() => {
+        try {
+          const html = ehfBuildManifestHtml(ehfBipSession);
+          const fileName = ehfManifestBaseName(ehfBipSession);
+          ehfRegistrarRomaneioPlanilha(ehfBipSession, html, fileName, 'EM_ANDAMENTO');
+          window.dispatchEvent(new CustomEvent('ehf:romaneioAtualizado', { detail: { reason: reason || 'autosave', sessionId: ehfBipSession.session.id } }));
+        } catch (e) {
+          console.warn('[EHF] Falha no autosave do romaneio:', e);
+        }
+      }, 1600);
+    }
+    window.ehfSalvarRomaneioAtual = function(status) {
+      if (!ehfBipSession?.session?.id) {
+        ehfBipToast('Nenhum romaneio aberto para salvar.', true);
+        return false;
+      }
+      try {
+        const html = ehfBuildManifestHtml(ehfBipSession);
+        const fileName = ehfManifestBaseName(ehfBipSession);
+        ehfRegistrarRomaneioPlanilha(ehfBipSession, html, fileName, status || 'EM_ANDAMENTO');
+        ehfBipToast('Romaneio salvo na planilha. Já pode abrir no PC para imprimir.');
+        window.dispatchEvent(new CustomEvent('ehf:romaneioAtualizado', { detail: { reason: 'manual', sessionId: ehfBipSession.session.id } }));
+        return true;
+      } catch (e) {
+        ehfBipToast('Não consegui salvar o romaneio agora.', true);
+        return false;
+      }
+    };
+    window.ehfGetBipSessionDetail = function() { return ehfBipSession; };
 
     function ehfOpenManifestWindow(html, existingWin, fileName) {
       let win = existingWin || null;
@@ -1764,6 +1799,7 @@ window.EHF_PANEL_RUNTIME_VERSION='4.2.31-DASHMARKETPLACE-GHPAGES';
         const corStatus = data.channelMatch !== false ? '#5bae5f' : '#ef4444';
         set(alertaBroadcastRef, { txt: `O operador <b>${nomeOperadorLocal}</b> bipou: <b>${payloadBipagem.lojaNome}</b> — <b>${payloadBipagem.canalEsperado}</b> <span style="color:${corStatus};">(${payloadBipagem.status})</span><br>Pedido: <b>${payloadBipagem.pedidoMarketplace || payloadBipagem.pedidoTiny || '-'}</b> · Código: <b>${payloadBipagem.idEtiqueta || payloadBipagem.codigoRastreio || codigoDigitado}</b>`, ts: agora });
         ehfBipToast(`${payloadBipagem.lojaNome} · pedido ${payloadBipagem.pedidoMarketplace || payloadBipagem.pedidoTiny || 'localizado'} · ${payloadBipagem.totalUnidades} unidade(s)`);
+        ehfAgendarAutosaveRomaneio('scan');
       } catch (error) {
         ehfDesmarcarCodigoBipadoLocal(codigoDigitado);
         const detail = error.data?.session;
@@ -2065,6 +2101,7 @@ window.EHF_PANEL_RUNTIME_VERSION='4.2.31-DASHMARKETPLACE-GHPAGES';
       if (auditTotal) auditTotal.textContent = totalBipadosFisico;
       atualizarBipagemExecutiva();
       window.recalcularDivergenciaBipagem();
+      ehfAgendarAutosaveRomaneio('firebase');
     });
 
 

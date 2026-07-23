@@ -3903,8 +3903,8 @@ body[data-active-module="embalagem"] .top-counters,body[data-active-module="emba
   <div id="view-atrasados" class="view-section ehf-module-view"><div id="ehf-atrasados-module" class="ehf-module-mount"></div></div>
   <div id="view-embalagem" class="view-section ehf-module-view"><div id="ehf-embalagem-module" class="ehf-module-mount"></div></div>
 
-  <script src="modules/atrasados.js?v=4231" defer></script>
-  <script src="modules/embalagem.js?v=4231" defer></script>
+  <script src="modules/atrasados.js?v=4234" defer></script>
+  <script src="modules/embalagem.js?v=4235" defer></script>
 
   <script>
 function toggleRow(key){const row=document.getElementById(`details-${key}`);if(row)row.classList.toggle('open')}
@@ -5721,7 +5721,10 @@ document.addEventListener('DOMContentLoaded',()=>setTimeout(ehfApplyHashView,0))
     }
   </script>
 
-  <script src="modules/mobile-camera-scan.js?v=4232" defer></script>
+  <script src="modules/mobile-site-nav.js?v=4235" defer></script>
+  <script src="modules/mobile-camera-scan.js?v=4235" defer></script>
+  <script src="modules/mobile-romaneio-pc.js?v=4235" defer></script>
+  <script src="modules/mobile-clean-bipagem.js?v=4235" defer></script>
   
 <script>
 (function(){
@@ -5729,10 +5732,10 @@ document.addEventListener('DOMContentLoaded',()=>setTimeout(ehfApplyHashView,0))
   function loadCameraScript(){
     if(window.EHF_MOBILE_CAMERA_SCAN_VERSION || document.querySelector('script[src*="mobile-camera-scan.js"]')) return;
     var s=document.createElement('script');
-    s.src='modules/mobile-camera-scan.js?v=4232';
+    s.src='modules/mobile-camera-scan.js?v=4235';
     s.defer=true;
     s.onload=function(){ console.log('[EHF] mobile-camera-scan carregado', window.EHF_MOBILE_CAMERA_SCAN_VERSION); };
-    s.onerror=function(){ console.error('[EHF] Falha ao carregar modules/mobile-camera-scan.js?v=4232'); };
+    s.onerror=function(){ console.error('[EHF] Falha ao carregar modules/mobile-camera-scan.js?v=4235'); };
     document.head.appendChild(s);
   }
   loadCameraScript();
@@ -5741,8 +5744,8 @@ document.addEventListener('DOMContentLoaded',()=>setTimeout(ehfApplyHashView,0))
 })();
 </script>
 
-  <script type="module" src="modules/painel-runtime.js?v=4231"></script>
-  <script src="modules/painel-guard.js?v=4231" defer></script>
+  <script type="module" src="modules/painel-runtime.js?v=4235"></script>
+  <script src="modules/painel-guard.js?v=4235" defer></script>
 
 
   <script>

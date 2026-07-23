@@ -1,28 +1,13 @@
-# DashMarketplace v4.2.32 - câmera iOS + mobile limpo
+# DashMarketplace v4.2.35 - Mobile com navegação completa
 
-Projeto pronto para GitHub Pages em `/DashMarketplace/`.
+Versão ajustada para GitHub Pages.
 
-## Correções
+Principais ajustes:
+- Mobile de bipagem limpo mantido.
+- Navegação global mobile adicionada no rodapé.
+- Acesso rápido a Painel, Bipagem, Embalagem, Atrasos e Menu.
+- Menu mobile com Logística, Motorista, Admin, Painel completo e Conferência.
+- Botão para abrir versão completa quando precisar.
+- Câmera mobile preservada para Android/iOS.
 
-- Câmera funcionando em Android usando detector nativo quando disponível.
-- iOS usa `html5-qrcode` como fallback, porque o BarcodeDetector/Shape Detection do Safari iOS não é confiável.
-- Botão `Foto do código` para versões/navegadores iOS que bloqueiam câmera ao vivo.
-- Interface mobile mais limpa: campo de bipe destacado, botões grandes, uma coluna e menos poluição visual.
-- Mantém leitor físico e digitação manual.
-
-## Teste
-
-Abra:
-
-```text
-https://maxuelsheskof18-boop.github.io/DashMarketplace/#bipagem?v=4232
-```
-
-No console:
-
-```js
-window.EHF_MOBILE_CAMERA_SCAN_VERSION
-window.EHFMobileCameraScan
-````
-
-Deve retornar `4.2.32-IOS-COMPAT-MOBILE-CLEAN` e um objeto.
+Suba o conteúdo desta pasta na raiz do repositório DashMarketplace.
