@@ -3903,8 +3903,8 @@ body[data-active-module="embalagem"] .top-counters,body[data-active-module="emba
   <div id="view-atrasados" class="view-section ehf-module-view"><div id="ehf-atrasados-module" class="ehf-module-mount"></div></div>
   <div id="view-embalagem" class="view-section ehf-module-view"><div id="ehf-embalagem-module" class="ehf-module-mount"></div></div>
 
-  <script src="modules/atrasados.js?v=4229" defer></script>
-  <script src="modules/embalagem.js?v=4229" defer></script>
+  <script src="modules/atrasados.js?v=4230" defer></script>
+  <script src="modules/embalagem.js?v=4230" defer></script>
 
   <script>
 function toggleRow(key){const row=document.getElementById(`details-${key}`);if(row)row.classList.toggle('open')}
@@ -5721,9 +5721,28 @@ document.addEventListener('DOMContentLoaded',()=>setTimeout(ehfApplyHashView,0))
     }
   </script>
 
-  <script src="modules/mobile-camera-scan.js?v=4229" defer></script>
-  <script type="module" src="modules/painel-runtime.js?v=4229"></script>
-  <script src="modules/painel-guard.js?v=4229" defer></script>
+  <script src="modules/mobile-camera-scan.js?v=4230" defer></script>
+  
+<script>
+(function(){
+  window.EHF_CAMERA_LOADER_VERSION='4.2.30-CAMERA-LOADER-CORRIGIDO';
+  function loadCameraScript(){
+    if(window.EHF_MOBILE_CAMERA_SCAN_VERSION || document.querySelector('script[src*="mobile-camera-scan.js"]')) return;
+    var s=document.createElement('script');
+    s.src='modules/mobile-camera-scan.js?v=4230';
+    s.defer=true;
+    s.onload=function(){ console.log('[EHF] mobile-camera-scan carregado', window.EHF_MOBILE_CAMERA_SCAN_VERSION); };
+    s.onerror=function(){ console.error('[EHF] Falha ao carregar modules/mobile-camera-scan.js?v=4230'); };
+    document.head.appendChild(s);
+  }
+  loadCameraScript();
+  document.addEventListener('DOMContentLoaded', loadCameraScript);
+  setTimeout(loadCameraScript, 800);
+})();
+</script>
+
+  <script type="module" src="modules/painel-runtime.js?v=4230"></script>
+  <script src="modules/painel-guard.js?v=4230" defer></script>
 
 
   <script>
