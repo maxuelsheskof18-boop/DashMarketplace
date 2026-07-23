@@ -1,0 +1,216 @@
+window.EHF_MOBILE_CAMERA_SCAN_VERSION='4.2.31-DASHMARKETPLACE-GHPAGES';
+(function(){
+  const state={active:false,stream:null,timer:null,detector:null,reader:null,controls:null,target:'',lastCode:'',lastAt:0,facingMode:'environment'};
+  const $=id=>document.getElementById(id);
+
+  function normalize(value){
+    const raw=String(value||'').trim();
+    if(!raw)return'';
+    const m=raw.match(/(?:^|[^0-9])(47\d{8,14})(?:[^0-9]|$)/);
+    if(m)return m[1];
+    const pack=raw.match(/(?:^|[^0-9])(20\d{13,18})(?:[^0-9]|$)/);
+    if(pack)return pack[1];
+    const br=raw.match(/\b(BR[A-Z0-9]{8,30})\b/i);
+    if(br)return br[1].toUpperCase();
+    const tbr=raw.match(/\b(TBR[A-Z0-9-]{6,30})\b/i);
+    if(tbr)return tbr[1].toUpperCase();
+    const mel=raw.match(/\b(MEL[0-9A-Z]{8,40})\b/i);
+    if(mel)return mel[1].toUpperCase();
+    const tokens=raw.match(/[A-Za-z0-9_-]{8,60}/g)||[];
+    return tokens.sort((a,b)=>b.length-a.length)[0]||raw.replace(/[^A-Za-z0-9_-]/g,'');
+  }
+
+  function visible(el){return !!(el && el.offsetParent!==null);}
+  function currentTarget(){
+    if(document.getElementById('view-bipagem')?.classList.contains('active')) return 'bipagem';
+    if(document.getElementById('view-embalagem')?.classList.contains('active')) return 'embalagem';
+    if(visible($('input-leitor-codigo'))) return 'bipagem';
+    if(visible($('ehfm-pack-input'))) return 'embalagem';
+    return 'bipagem';
+  }
+
+  function injectStyles(){
+    if($('ehf-mobile-camera-scan-style'))return;
+    const st=document.createElement('style');
+    st.id='ehf-mobile-camera-scan-style';
+    st.textContent=`
+      .ehf-camera-btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;border:1px solid rgba(14,165,233,.7);background:#0ea5e9;color:#001018;border-radius:10px;padding:11px 14px;font-size:12px;font-weight:950;cursor:pointer;min-height:42px;box-shadow:0 8px 26px rgba(14,165,233,.16)}
+      .ehf-camera-btn:hover{filter:brightness(1.08)}
+      .bip-input-pro .ehf-camera-btn{margin-top:10px;width:100%;max-width:260px}
+      .ehf-camera-modal{position:fixed;inset:0;z-index:999999;background:rgba(0,0,0,.88);display:flex;align-items:center;justify-content:center;padding:14px}
+      .ehf-camera-card{width:min(760px,100%);background:#07111d;border:1px solid rgba(255,138,0,.62);border-radius:16px;box-shadow:0 24px 90px rgba(0,0,0,.58);overflow:hidden;color:#fff;font-family:inherit}
+      .ehf-camera-head{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 14px;border-bottom:1px solid rgba(255,255,255,.08)}
+      .ehf-camera-head b{font-size:15px}.ehf-camera-head span{color:#93a4b8;font-size:11px}
+      .ehf-camera-body{position:relative;background:#000;min-height:300px;display:flex;align-items:center;justify-content:center}
+      .ehf-camera-body video{width:100%;max-height:72vh;object-fit:cover;background:#000}
+      .ehf-camera-guide{position:absolute;left:7%;right:7%;top:40%;height:84px;border:2px solid rgba(255,138,0,.98);border-radius:12px;box-shadow:0 0 0 999px rgba(0,0,0,.25);pointer-events:none}
+      .ehf-camera-guide:after{content:'';position:absolute;left:10px;right:10px;top:50%;border-top:2px solid rgba(34,197,94,.98);box-shadow:0 0 14px rgba(34,197,94,.78)}
+      .ehf-camera-status{padding:9px 14px;color:#cbd5e1;font-size:12px;background:#0b1420;border-top:1px solid rgba(255,255,255,.08)}
+      .ehf-camera-actions{display:flex;gap:8px;flex-wrap:wrap;padding:12px 14px;background:#07111d}
+      .ehf-camera-actions button{border:1px solid rgba(255,255,255,.14);background:#111b29;color:#fff;border-radius:9px;padding:9px 12px;font-weight:800;cursor:pointer}.ehf-camera-actions button.danger{border-color:rgba(239,68,68,.6);color:#fecaca;background:rgba(239,68,68,.10)}
+      .ehf-camera-fallback{display:none;padding:0 14px 14px;color:#94a3b8;font-size:11px}
+      @media(max-width:700px){.ehf-camera-body{min-height:62vh}.ehf-camera-guide{left:5%;right:5%;top:43%;height:78px}.bip-input-pro .ehf-camera-btn{max-width:none;width:100%;min-height:48px}}
+    `;
+    document.head.appendChild(st);
+  }
+
+  function ensureButtons(){
+    injectStyles();
+    const bipInput=$('input-leitor-codigo');
+    if(bipInput && !$('ehf-bip-camera-btn')){
+      const btn=document.createElement('button');
+      btn.id='ehf-bip-camera-btn';
+      btn.type='button';
+      btn.className='ehf-camera-btn';
+      btn.textContent='Ler com câmera';
+      btn.onclick=()=>openCameraScanner('bipagem');
+      const box=bipInput.closest('.input-bip-box')||bipInput.parentElement;
+      if(box) box.appendChild(btn);
+    }
+    const embInput=$('ehfm-pack-input');
+    if(embInput && !$('ehfm-pack-camera') && !$('ehf-pack-camera-fallback-btn')){
+      const btn=document.createElement('button');
+      btn.id='ehf-pack-camera-fallback-btn';
+      btn.type='button';
+      btn.className='ehf-camera-btn';
+      btn.textContent='Ler com câmera';
+      btn.onclick=()=>openCameraScanner('embalagem');
+      const row=embInput.closest('.ehfm-scan-row')||embInput.parentElement;
+      if(row) row.appendChild(btn);
+    }
+    const supported=!!(navigator.mediaDevices&&navigator.mediaDevices.getUserMedia);
+    ['ehf-bip-camera-btn','ehf-pack-camera-fallback-btn','ehfm-pack-camera'].forEach(id=>{const el=$(id); if(el) el.style.display=supported?'inline-flex':'none';});
+  }
+
+  function cameraSetStatus(txt){ const el=$('ehf-camera-status'); if(el)el.textContent=txt||''; }
+
+  function ensureModal(){
+    let modal=$('ehf-camera-modal');
+    if(modal)return modal;
+    modal=document.createElement('div');
+    modal.id='ehf-camera-modal';
+    modal.className='ehf-camera-modal';
+    modal.style.display='none';
+    modal.innerHTML=`
+      <div class="ehf-camera-card" role="dialog" aria-modal="true">
+        <div class="ehf-camera-head">
+          <div><b>Leitor por câmera</b><br><span id="ehf-camera-context">Aponte para o código de barras ou QR da etiqueta</span></div>
+          <button id="ehf-camera-close" class="danger" type="button">Fechar</button>
+        </div>
+        <div class="ehf-camera-body">
+          <video id="ehf-camera-video" playsinline muted></video>
+          <div class="ehf-camera-guide"></div>
+        </div>
+        <div id="ehf-camera-status" class="ehf-camera-status">Preparando câmera...</div>
+        <div class="ehf-camera-actions">
+          <button id="ehf-camera-flip" type="button">Alternar câmera</button>
+          <button id="ehf-camera-manual" type="button">Digitar manualmente</button>
+        </div>
+        <div id="ehf-camera-fallback" class="ehf-camera-fallback">Se a câmera não abrir, permita o acesso à câmera no navegador ou use o campo manual.</div>
+      </div>`;
+    document.body.appendChild(modal);
+    $('ehf-camera-close').onclick=()=>closeCameraScanner(true);
+    $('ehf-camera-manual').onclick=()=>{ const t=state.target||currentTarget(); closeCameraScanner(true); setTimeout(()=>focusTarget(t),80); };
+    $('ehf-camera-flip').onclick=async()=>{ state.facingMode=state.facingMode==='environment'?'user':'environment'; const t=state.target||currentTarget(); await closeCameraScanner(false); await openCameraScanner(t); };
+    return modal;
+  }
+
+  function focusTarget(target){
+    const input=target==='embalagem' ? $('ehfm-pack-input') : $('input-leitor-codigo');
+    if(input){ input.focus(); try{input.select();}catch(_){}}
+  }
+
+  function consumeCode(code,target){
+    const t=target||state.target||currentTarget();
+    const input=t==='embalagem' ? $('ehfm-pack-input') : $('input-leitor-codigo');
+    if(!input)return;
+    input.value=code;
+    input.focus();
+    try{ if(navigator.vibrate)navigator.vibrate(80); }catch(_){ }
+    const ev=new KeyboardEvent('keydown',{key:'Enter',code:'Enter',which:13,keyCode:13,bubbles:true,cancelable:true});
+    input.dispatchEvent(ev);
+    if(t==='embalagem'){
+      const btn=$('ehfm-pack-search');
+      if(btn && !ev.defaultPrevented) btn.click();
+    }
+  }
+
+  function onCameraCode(raw){
+    const now=Date.now();
+    const code=normalize(raw);
+    if(!code)return;
+    if(state.lastCode===code&&(now-state.lastAt)<1800)return;
+    state.lastCode=code; state.lastAt=now;
+    const t=state.target||currentTarget();
+    closeCameraScanner(true);
+    setTimeout(()=>consumeCode(code,t),120);
+  }
+
+  async function loadZxingBrowser(){
+    if(window.ZXingBrowser&&window.ZXingBrowser.BrowserMultiFormatReader)return true;
+    const urls=['https://cdn.jsdelivr.net/npm/@zxing/browser@0.1.5/umd/index.min.js','https://unpkg.com/@zxing/browser@0.1.5/umd/index.min.js'];
+    for(const url of urls){
+      try{ await new Promise((resolve,reject)=>{ const s=document.createElement('script'); s.src=url; s.async=true; s.onload=resolve; s.onerror=reject; document.head.appendChild(s); }); if(window.ZXingBrowser&&window.ZXingBrowser.BrowserMultiFormatReader)return true; }catch(_){ }
+    }
+    return false;
+  }
+
+  async function openCameraScanner(target){
+    try{
+      state.target=target||currentTarget();
+      if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){ alert('Este navegador não liberou câmera. Abra pelo Vercel em HTTPS ou use digitação manual.'); return; }
+      const modal=ensureModal();
+      $('ehf-camera-context').textContent=state.target==='bipagem'?'Bipagem: aponte para a etiqueta do pacote':'Embalagem: aponte para a etiqueta do pedido';
+      modal.style.display='flex';
+      state.active=true;
+      cameraSetStatus('Solicitando permissão da câmera...');
+      const video=$('ehf-camera-video');
+      const stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:state.facingMode||'environment'},width:{ideal:1280},height:{ideal:720}},audio:false});
+      state.stream=stream;
+      video.srcObject=stream;
+      await video.play();
+
+      if('BarcodeDetector' in window){
+        let formats=['qr_code','code_128','code_39','code_93','ean_13','ean_8','itf','codabar','data_matrix','pdf417','upc_a','upc_e'];
+        try{ if(window.BarcodeDetector.getSupportedFormats){ const supported=await window.BarcodeDetector.getSupportedFormats(); formats=formats.filter(f=>supported.includes(f)); } state.detector=new BarcodeDetector({formats:formats.length?formats:undefined}); }catch(_){ state.detector=new BarcodeDetector(); }
+        cameraSetStatus('Câmera ativa. Centralize a etiqueta dentro do retângulo.');
+        const tick=async()=>{
+          if(!state.active||!state.detector)return;
+          try{ const codes=await state.detector.detect(video); if(codes&&codes.length){ onCameraCode(codes[0].rawValue||codes[0].rawData||codes[0].value||''); return; } }catch(_){ }
+          state.timer=setTimeout(tick,160);
+        };
+        tick();
+        return;
+      }
+
+      cameraSetStatus('Leitor nativo indisponível. Carregando leitor compatível...');
+      const ok=await loadZxingBrowser();
+      if(!ok){ cameraSetStatus('Não foi possível carregar o leitor de código. Use o campo manual.'); const fb=$('ehf-camera-fallback'); if(fb)fb.style.display='block'; return; }
+      const reader=new window.ZXingBrowser.BrowserMultiFormatReader();
+      state.reader=reader;
+      cameraSetStatus('Câmera ativa. Centralize o código para leitura.');
+      const controls=await reader.decodeFromVideoElement(video,(result,err,ctrls)=>{ if(result){ state.controls=ctrls||state.controls; onCameraCode(result.getText?result.getText():String(result.text||result)); } });
+      state.controls=controls;
+    }catch(error){
+      cameraSetStatus('Erro ao abrir câmera: '+(error&&error.message?error.message:String(error)));
+      alert('Não consegui abrir a câmera. Verifique a permissão do navegador e use HTTPS.');
+    }
+  }
+
+  async function closeCameraScanner(hide=true){
+    state.active=false;
+    if(state.timer){ clearTimeout(state.timer); state.timer=null; }
+    try{ if(state.controls&&state.controls.stop)state.controls.stop(); }catch(_){ }
+    try{ if(state.reader&&state.reader.reset)state.reader.reset(); }catch(_){ }
+    try{ if(state.stream){ state.stream.getTracks().forEach(t=>t.stop()); state.stream=null; } }catch(_){ }
+    const video=$('ehf-camera-video'); if(video)video.srcObject=null;
+    if(hide){ const modal=$('ehf-camera-modal'); if(modal)modal.style.display='none'; }
+  }
+
+  window.EHFMobileCameraScan={version:window.EHF_MOBILE_CAMERA_SCAN_VERSION,open:openCameraScanner,close:closeCameraScanner,ensureButtons};
+  function boot(){ ensureButtons(); setTimeout(ensureButtons,500); setTimeout(ensureButtons,1500); }
+  document.addEventListener('DOMContentLoaded',boot);
+  window.addEventListener('hashchange',()=>setTimeout(ensureButtons,120));
+  const mo=new MutationObserver(()=>ensureButtons());
+  mo.observe(document.documentElement,{childList:true,subtree:true});
+})();

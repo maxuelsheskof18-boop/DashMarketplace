@@ -1,4 +1,4 @@
-window.EHF_PANEL_RUNTIME_VERSION='4.2.27-ROMANEIO-PLANILHA-MENSAL';
+window.EHF_PANEL_RUNTIME_VERSION='4.2.31-DASHMARKETPLACE-GHPAGES';
 (function(){
   if (document.getElementById('ehf-bip-history-action-css')) return;
   const st = document.createElement('style');
