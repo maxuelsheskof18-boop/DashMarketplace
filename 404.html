@@ -5721,7 +5721,7 @@ document.addEventListener('DOMContentLoaded',()=>setTimeout(ehfApplyHashView,0))
     }
   </script>
 
-  <script src="modules/mobile-camera-scan.js?v=4231" defer></script>
+  <script src="modules/mobile-camera-scan.js?v=4232" defer></script>
   
 <script>
 (function(){
@@ -5729,10 +5729,10 @@ document.addEventListener('DOMContentLoaded',()=>setTimeout(ehfApplyHashView,0))
   function loadCameraScript(){
     if(window.EHF_MOBILE_CAMERA_SCAN_VERSION || document.querySelector('script[src*="mobile-camera-scan.js"]')) return;
     var s=document.createElement('script');
-    s.src='modules/mobile-camera-scan.js?v=4231';
+    s.src='modules/mobile-camera-scan.js?v=4232';
     s.defer=true;
     s.onload=function(){ console.log('[EHF] mobile-camera-scan carregado', window.EHF_MOBILE_CAMERA_SCAN_VERSION); };
-    s.onerror=function(){ console.error('[EHF] Falha ao carregar modules/mobile-camera-scan.js?v=4231'); };
+    s.onerror=function(){ console.error('[EHF] Falha ao carregar modules/mobile-camera-scan.js?v=4232'); };
     document.head.appendChild(s);
   }
   loadCameraScript();
