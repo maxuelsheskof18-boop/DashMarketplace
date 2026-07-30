@@ -1,7 +1,7 @@
 (function(){
   'use strict';
 
-  const VERSION = '4.2.40-ROMANEIO-DIA-LIMPO';
+  const VERSION = '4.2.43-ROMANEIO-DIA-RESUMO-OPERACIONAL';
   const MIN_KEY = 'ehf_romaneios_salvos_minimizado';
   const WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbwQ8-Rn-zZJQM0fLm9js3ErtJZefRnHP55E3M0r3Z_TIXS_skTioZ6p3yHqTLFYxPU9/exec';
 

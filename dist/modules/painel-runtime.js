@@ -1,4 +1,4 @@
-window.EHF_PANEL_RUNTIME_VERSION='4.2.40-DIA-INTELIGENCIA-BIPAGEM';
+window.EHF_PANEL_RUNTIME_VERSION='4.2.44-RESUMO-OPERACIONAL-DETALHADO';
 (function(){
   if (document.getElementById('ehf-bip-history-action-css')) return;
   const st = document.createElement('style');
@@ -1143,7 +1143,8 @@ window.EHF_PANEL_RUNTIME_VERSION='4.2.40-DIA-INTELIGENCIA-BIPAGEM';
           ecommerce_order_id: b.pedidoMarketplace || '',
           normalized_code: b.idEtiqueta || b.codigoRastreio || b.codigoLimpo || b.codigo || '',
           code: b.codigo || '',
-          items: b.items || [],
+          items: b.items || ehfItensResumoParaItems(b.produtosResumo || ''),
+          produtosResumo: b.produtosResumo || '',
           total_units: Number(b.totalUnidades || b.total_units || 0),
           status: b.status || 'Conferido',
           channel_name: b.canalEsperado || b.canalNome || '',
@@ -1154,7 +1155,7 @@ window.EHF_PANEL_RUNTIME_VERSION='4.2.40-DIA-INTELIGENCIA-BIPAGEM';
 
       const manifestScans = Array.from(byCode.values()).filter(scan => String(scan.status || '').toUpperCase() !== 'REMOVIDO');
       const rows = manifestScans.map((scan, index) => {
-        const products = (scan.items || []).map((item) => `${Number(item.quantity || item.quantidade || 0)}x ${item.description || item.descricao || item.sku || item.codigo || ''}`).join('<br>');
+        const products = (scan.items || []).map((item) => `${Number(item.quantity || item.quantidade || 0)}x ${item.description || item.descricao || item.sku || item.codigo || ''}`).join('<br>') || ehfEscapeHtml(scan.produtosResumo || '');
         const status = scan.status || (String(scan.channel_match || '').toLowerCase() === 'false' ? 'Canal divergente' : 'Conferido');
         const statusColor = /diverg|nao|não|erro|bloq/i.test(status) ? '#b91c1c' : '#166534';
         const note = scan.note ? `<br><small>${ehfEscapeHtml(scan.note)}</small>` : '';
@@ -1172,6 +1173,146 @@ window.EHF_PANEL_RUNTIME_VERSION='4.2.40-DIA-INTELIGENCIA-BIPAGEM';
 
     const EHF_ROMANEIO_WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbwQ8-Rn-zZJQM0fLm9js3ErtJZefRnHP55E3M0r3Z_TIXS_skTioZ6p3yHqTLFYxPU9/exec';
     const EHF_ROMANEIO_PLANILHA_SECRET = '1329269';
+
+
+    function ehfPlanilhaJsonpBipagem(action, params = {}, timeout = 22000) {
+      return new Promise((resolve, reject) => {
+        if (!EHF_ROMANEIO_WEB_APP_URL) return reject(new Error('URL da planilha não configurada.'));
+        const callback = '__ehfPlanilhaBip_' + Date.now() + '_' + Math.random().toString(36).slice(2);
+        const url = new URL(EHF_ROMANEIO_WEB_APP_URL);
+        url.searchParams.set('action', action);
+        url.searchParams.set('callback', callback);
+        url.searchParams.set('ts', String(Date.now()));
+        Object.keys(params || {}).forEach(k => {
+          if (params[k] !== undefined && params[k] !== null) url.searchParams.set(k, String(params[k]));
+        });
+        let done = false;
+        const script = document.createElement('script');
+        const cleanup = () => {
+          try { delete window[callback]; } catch (_) { window[callback] = undefined; }
+          try { script.remove(); } catch (_) {}
+        };
+        const timer = setTimeout(() => {
+          if (done) return;
+          done = true; cleanup(); reject(new Error('Tempo esgotado ao consultar planilha.'));
+        }, timeout);
+        window[callback] = (data) => {
+          if (done) return;
+          done = true; clearTimeout(timer); cleanup(); resolve(data);
+        };
+        script.onerror = () => {
+          if (done) return;
+          done = true; clearTimeout(timer); cleanup(); reject(new Error('Falha ao consultar planilha.'));
+        };
+        script.src = url.toString();
+        document.head.appendChild(script);
+      });
+    }
+
+    function ehfItensResumoParaItems(resumo) {
+      const txt = String(resumo || '').trim();
+      if (!txt) return [];
+      return txt.split(/\s*\|\|\s*/).map(part => {
+        const p = String(part || '').trim();
+        const m = p.match(/^(\d+(?:[,.]\d+)?)\s*x\s*-?\s*(.+)$/i);
+        if (m) return { quantity: Number(String(m[1]).replace(',', '.')) || 1, description: m[2].trim() };
+        return p ? { quantity: 1, description: p } : null;
+      }).filter(Boolean);
+    }
+
+    function ehfExtrairItemsDeRaw(raw) {
+      if (!raw || typeof raw !== 'object') return [];
+      const fontes = [];
+      if (Array.isArray(raw.itens)) fontes.push(raw.itens);
+      if (Array.isArray(raw.item)) fontes.push(raw.item);
+      if (raw.itens && !Array.isArray(raw.itens)) fontes.push([raw.itens]);
+      if (raw.item && !Array.isArray(raw.item)) fontes.push([raw.item]);
+      const items = [];
+      fontes.flat().forEach(it => {
+        const obj = it && (it.item || it.produto || it);
+        if (!obj) return;
+        const description = obj.descricao || obj.nome || obj.description || obj.sku || obj.codigo || '';
+        const quantity = Number(String(obj.quantidade || obj.qtd || obj.quantity || 1).replace(',', '.')) || 1;
+        if (description) items.push({ quantity, description: String(description), sku: obj.sku || obj.codigo || obj.idProduto || '' });
+      });
+      return items;
+    }
+
+    function ehfNormalizarLookupPlanilhaBipagem(data, codigo) {
+      const matches = Array.isArray(data && data.matches) ? data.matches : [];
+      if (!data || data.ok === false || !matches.length) return null;
+      const m = matches[0] || {};
+      let raw = {};
+      try { raw = typeof m.raw_json === 'string' ? JSON.parse(m.raw_json) : (m.raw_json || {}); } catch (_) { raw = {}; }
+      let items = ehfExtrairItemsDeRaw(raw);
+      if (!items.length) items = ehfItensResumoParaItems(m.itens_resumo || m.produtos || '');
+      const totalUnidades = items.reduce((acc, it) => acc + Number(it.quantity || it.quantidade || 0), 0);
+      const lojaKey = normalizarLojaKey(m.conta || m.loja || raw.conta || raw.account || '');
+      const tinyNumero = m.numero || raw.numero || raw.numeroPedido || raw.tiny_number || '';
+      const ecommerce = m.numero_pedido_ecommerce || raw.numeroPedidoEcommerce || raw.ecommerce_order_id || raw.numeroEcommerce || '';
+      return {
+        source: 'planilha',
+        lojaKey,
+        lojaNome: NOMES_LOJAS_BIPAGEM[lojaKey] || m.conta || lojaKey,
+        codigoNormalizado: codigo,
+        codigoLido: codigo,
+        totalUnidades,
+        items,
+        produtosResumo: m.itens_resumo || items.map(i => `${Number(i.quantity || 1)}x ${i.description || ''}`).join(' || '),
+        pedido: {
+          numero: tinyNumero,
+          numeroEcommerce: ecommerce,
+          idSeparacao: m.id_separacao || raw.id || raw.idSeparacao || '',
+          codigoRastreamento: codigo
+        },
+        rawPlanilha: m
+      };
+    }
+
+    async function ehfLookupPlanilhaBipagem(codigo) {
+      const code = String(codigo || '').trim();
+      if (!code) return null;
+      try {
+        const data = await ehfPlanilhaJsonpBipagem('buscarSeparacao', { codigo: code, live: 1 });
+        return ehfNormalizarLookupPlanilhaBipagem(data, code);
+      } catch (e) {
+        console.warn('[EHF] Planilha não respondeu na bipagem:', e);
+        return null;
+      }
+    }
+
+    function ehfLookupTemPedido(lookup) {
+      if (!lookup) return false;
+      const p = lookup.pedido || {};
+      return !!(p.numero || p.numeroEcommerce || p.id || p.idSeparacao || lookup.tinyNumber || lookup.ecommerceOrderId);
+    }
+
+    function ehfMesclarLookupBipagem(workerLookup, planilhaLookup) {
+      if (!planilhaLookup) return workerLookup || {};
+      const w = workerLookup || {};
+      const wp = w.pedido || {};
+      const pp = planilhaLookup.pedido || {};
+      const itemsWorker = Array.isArray(w.items) ? w.items : (Array.isArray(w.pedido && w.pedido.itens) ? w.pedido.itens : []);
+      const items = itemsWorker.length ? itemsWorker : (planilhaLookup.items || []);
+      return {
+        ...w,
+        ...(!w.lojaKey || normalizarLojaKey(w.lojaKey) === 'nao_localizada' ? { lojaKey: planilhaLookup.lojaKey, lojaNome: planilhaLookup.lojaNome } : {}),
+        codigoNormalizado: w.codigoNormalizado || planilhaLookup.codigoNormalizado,
+        codigoLido: w.codigoLido || planilhaLookup.codigoLido,
+        totalUnidades: Number(w.totalUnidades || 0) || Number(planilhaLookup.totalUnidades || 0),
+        items,
+        produtosResumo: w.produtosResumo || planilhaLookup.produtosResumo || '',
+        pedido: {
+          ...pp,
+          ...wp,
+          numero: wp.numero || pp.numero || '',
+          numeroEcommerce: wp.numeroEcommerce || pp.numeroEcommerce || '',
+          idSeparacao: wp.idSeparacao || pp.idSeparacao || '',
+          codigoRastreamento: wp.codigoRastreamento || pp.codigoRastreamento || planilhaLookup.codigoNormalizado || ''
+        },
+        planilhaLookup
+      };
+    }
 
     function ehfBuildManifestScansForPlanilha(detail) {
       const { session, scans = [], summary = {} } = detail || {};
@@ -1194,7 +1335,8 @@ window.EHF_PANEL_RUNTIME_VERSION='4.2.40-DIA-INTELIGENCIA-BIPAGEM';
           ecommerce_order_id: b.pedidoMarketplace || '',
           normalized_code: b.idEtiqueta || b.codigoRastreio || b.codigoLimpo || b.codigo || '',
           code: b.codigo || '',
-          items: b.items || [],
+          items: b.items || ehfItensResumoParaItems(b.produtosResumo || ''),
+          produtosResumo: b.produtosResumo || '',
           total_units: Number(b.totalUnidades || b.total_units || 0),
           status: b.status || 'Conferido',
           channel_name: b.canalEsperado || b.canalNome || '',
@@ -1210,7 +1352,7 @@ window.EHF_PANEL_RUNTIME_VERSION='4.2.40-DIA-INTELIGENCIA-BIPAGEM';
         divergentes: Number(summary.notFound || 0) || manifestScans.filter(s => /diverg|nao|não|erro|bloq/i.test(String(s.status || ''))).length
       };
       const rows = manifestScans.map((scan, index) => {
-        const products = (scan.items || []).map((item) => `${Number(item.quantity || item.quantidade || 0)}x ${item.description || item.descricao || item.sku || item.codigo || ''}`).join(' || ');
+        const products = (scan.items || []).map((item) => `${Number(item.quantity || item.quantidade || 0)}x ${item.description || item.descricao || item.sku || item.codigo || ''}`).join(' || ') || scan.produtosResumo || '';
         return {
           ordem: index + 1,
           loja: scan.account || '',
@@ -1514,52 +1656,86 @@ window.EHF_PANEL_RUNTIME_VERSION='4.2.40-DIA-INTELIGENCIA-BIPAGEM';
         .replace(/[‘’]/g, "'")
         .trim();
 
-      function pick(re) {
-        const m = txt.match(re);
-        return m ? String(m[1] || m[0] || '').trim() : '';
+      const sessionChannel = String(ehfBipSession?.session?.channel_name || '').toLowerCase();
+      const allowTikTok = sessionChannel.includes('tiktok');
+      const allowAmazon = sessionChannel.includes('amazon');
+      const allowMercadoLivre = sessionChannel.includes('mercado') || sessionChannel.includes('flex') || sessionChannel.includes('coleta') || sessionChannel.includes('agencia') || sessionChannel.includes('agência');
+      const allowShopee = sessionChannel.includes('shopee') || sessionChannel.includes('spx');
+
+      function clean(v) { return String(v || '').trim().replace(/[^A-Za-z0-9]/g, '').toUpperCase(); }
+      function isNfe(v) { return /^\d{44}$/.test(String(v || '').trim()) && String(v || '').startsWith('35'); }
+      function acceptCandidate(v, forcedType) {
+        const c = clean(v);
+        if (!c || isNfe(c)) return '';
+        // Aceitação estrita por canal da sessão. Isso impede BR em Mercado Livre,
+        // 47 em Shopee/SPX e 999 fora de TikTok. O objetivo é não sujar o romaneio.
+        if (allowMercadoLivre && /^MEL47\d{9,13}[A-Z0-9]*$/.test(c)) return c;
+        if (allowMercadoLivre && /^S47\d{9,13}$/.test(c)) return c.slice(1);
+        if (allowMercadoLivre && /^47\d{9,13}$/.test(c)) return c;
+        // Shopee/SPX: BR + rastreio. Aceita letra final ou dígito final, mas somente no canal Shopee/SPX.
+        if (allowShopee && /^BR\d{10,16}[A-Z0-9]$/.test(c)) return c;
+        // Amazon só entra quando o canal/sessão é Amazon.
+        if (allowAmazon && /^TBR\d{8,}$/.test(c)) return c;
+        // TikTok/J&T 999 só entra quando o romaneio/sessão for TikTok. Isso bloqueia 999 lido em etiqueta Shopee/ML.
+        if ((allowTikTok || forcedType === 'tiktok') && /^999\d{12,}$/.test(c)) return c;
+        return '';
       }
 
-      // QR Mercado Livre em JSON real: {"id":"475...","t":"lm"} ou {"id":"475...","sender_id":...}
+      // QR Mercado Livre em JSON real: {"id":"475...","t":"lm"}.
       try {
         const jsonStart = txt.indexOf('{');
         const jsonEnd = txt.lastIndexOf('}');
         if (jsonStart >= 0 && jsonEnd > jsonStart) {
           const obj = JSON.parse(txt.slice(jsonStart, jsonEnd + 1));
-          if (obj && obj.id && /^\d{9,14}$/.test(String(obj.id))) return String(obj.id).trim();
-          if (obj && obj.codigoRastreamento) return String(obj.codigoRastreamento).trim().toUpperCase();
-          if (obj && obj.tracking_code) return String(obj.tracking_code).trim().toUpperCase();
+          const candidate = acceptCandidate(obj.id || obj.codigoRastreamento || obj.tracking_code || obj.trackingCode || '');
+          if (candidate) return candidate;
         }
       } catch (_) {}
 
-      const patterns = [
-        /\b(MEL\d{8,20}[A-Z0-9]*)\b/i,
-        /\b(BR\d{10,}[A-Z0-9])\b/i,
-        /\b(TBR\d{8,})\b/i,
-        /\b(999\d{12,})\b/,
-        /\b(47\d{9,13})\b/,
-        /(?:\"id\"\s*:\s*\"?|\bid\b[^0-9]{0,8})(47\d{9,13})/i,
-        /(?:codigoRastreamento|tracking|trackingCode|codigo_rastreio|etiqueta|shipment)[^A-Za-z0-9]{0,12}([A-Z]{2}\d{8,}[A-Z0-9]|\d{10,})/i
-      ];
+      const candidates = [];
+      const pushMatches = (re) => {
+        let m;
+        const rx = new RegExp(re.source, re.flags.includes('g') ? re.flags : re.flags + 'g');
+        while ((m = rx.exec(txt)) !== null) candidates.push(m[1] || m[0]);
+      };
 
-      for (const re of patterns) {
-        const found = pick(re);
-        if (found) return found.toUpperCase();
+      pushMatches(/\b(MEL47\d{9,13}[A-Z0-9]*)\b/i);
+      pushMatches(/\b(S47\d{9,13})\b/i);
+      pushMatches(/\b(47\d{9,13})\b/);
+      pushMatches(/\b(BR\d{10,16}[A-Z0-9])\b/i);
+      if (allowAmazon) pushMatches(/\b(TBR\d{8,})\b/i);
+      if (allowTikTok) pushMatches(/\b(999\d{12,})\b/);
+
+      // Campos textuais conhecidos. Evita aceitar qualquer número solto sem contexto.
+      pushMatches(/(?:codigoRastreamento|tracking|trackingCode|codigo_rastreio|etiqueta|shipment|id)[^A-Za-z0-9]{0,16}(MEL47\d{9,13}[A-Z0-9]*|S47\d{9,13}|47\d{9,13}|BR\d{10,16}[A-Z0-9]|TBR\d{8,}|999\d{12,})/i);
+
+      for (const cand of candidates) {
+        const ok = acceptCandidate(cand);
+        if (ok) return ok;
       }
 
-      const compact = txt.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
-      if (/^BR\d{10,}[A-Z0-9]$/.test(compact)) return compact;
-      if (/^MEL\d{8,20}[A-Z0-9]*$/.test(compact)) return compact;
-      if (/^TBR\d{8,}$/.test(compact)) return compact;
-      if (/^999\d{12,}$/.test(compact)) return compact;
-      if (/^47\d{9,13}$/.test(compact)) return compact;
+      const compact = clean(txt);
+      const direct = acceptCandidate(compact);
+      if (direct) return direct;
 
-      // Bloqueia leituras curtas/ruído de câmera para não virar "não localizada" no romaneio.
+      // Bloqueia NFe, EAN, número curto, número 999 fora do TikTok e ruído de câmera.
       return '';
     }
 
     function ehfCodigoPareceOperacional(codigo) {
-      const c = String(codigo || '').trim().toUpperCase();
-      return /^(BR\d{10,}[A-Z0-9]|MEL\d{8,20}[A-Z0-9]*|47\d{9,13}|999\d{12,}|TBR\d{8,})$/.test(c);
+      const c = String(codigo || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+      if (!c) return false;
+      if (/^\d{44}$/.test(c) && c.startsWith('35')) return false; // chave NF-e
+      const sessionChannel = String(ehfBipSession?.session?.channel_name || '').toLowerCase();
+      const allowTikTok = sessionChannel.includes('tiktok');
+      const allowAmazon = sessionChannel.includes('amazon');
+      const allowMercadoLivre = sessionChannel.includes('mercado') || sessionChannel.includes('flex') || sessionChannel.includes('coleta') || sessionChannel.includes('agencia') || sessionChannel.includes('agência');
+      const allowShopee = sessionChannel.includes('shopee') || sessionChannel.includes('spx');
+      if (allowMercadoLivre && /^(MEL47\d{9,13}[A-Z0-9]*|S47\d{9,13}|47\d{9,13})$/.test(c)) return true;
+      if (allowShopee && /^BR\d{10,16}[A-Z0-9]$/.test(c)) return true;
+      if (allowAmazon && /^TBR\d{8,}$/.test(c)) return true;
+      if (allowTikTok && /^999\d{12,}$/.test(c)) return true;
+      return false;
     }
 
     function limparCodigoBipado(codigoOriginal) {
@@ -1683,12 +1859,18 @@ window.EHF_PANEL_RUNTIME_VERSION='4.2.40-DIA-INTELIGENCIA-BIPAGEM';
     function montarResumoEsperadoPorLojaCanal(formasEnvioPayload) {
       const resumo = {};
       const origem = formasEnvioPayload && formasEnvioPayload.formasEnvio ? formasEnvioPayload.formasEnvio : {};
+      const statusPermitidos = new Set(['aguardando','emSeparacao','emseparacao','em_separacao']);
       Object.keys(origem).forEach(lojaOriginal => {
         const lojaKey = normalizarLojaKey(lojaOriginal);
         if (!resumo[lojaKey]) resumo[lojaKey] = {};
         const situacoes = origem[lojaOriginal] || {};
-        Object.keys(situacoes).forEach(situacaoKey => {
-          const formas = situacoes[situacaoKey] || {};
+        Object.keys(situacoes).forEach(situacaoKeyOriginal => {
+          const situacaoKey = normalizarTexto(situacaoKeyOriginal).replace(/_/g,'');
+          const permite = statusPermitidos.has(situacaoKeyOriginal) || statusPermitidos.has(situacaoKey);
+          // Para o resumo de bipagem, conta somente o que ainda está em fluxo operacional.
+          // Separadas/embaladas antigas não entram como "faltando".
+          if (!permite) return;
+          const formas = situacoes[situacaoKeyOriginal] || {};
           Object.keys(formas).forEach(idFormaEnvio => {
             const qtd = Number(formas[idFormaEnvio] || 0);
             if (qtd <= 0) return;
@@ -1738,14 +1920,101 @@ window.EHF_PANEL_RUNTIME_VERSION='4.2.40-DIA-INTELIGENCIA-BIPAGEM';
       } catch (e) { console.warn("Falha ao atualizar resumo esperado da bipagem:", e); }
     }
 
+    function ehfEncontrarCanalResumoCompat(lojaKey, canalNome) {
+      const loja = ehfResumoLojaCanal[lojaKey] || {};
+      const nomes = Object.keys(loja);
+      if (!nomes.length) return '';
+      const alvo = normalizarCanalNome(canalNome || '');
+      if (loja[alvo]) return alvo;
+      const aliases = getAliasesCanal(canalNome || alvo).map(a => normalizarCanalNome(a));
+      let found = nomes.find(n => normalizarCanalNome(n) === alvo);
+      if (found) return found;
+      found = nomes.find(n => aliases.includes(normalizarCanalNome(n)));
+      if (found) return found;
+      const alvoTxt = normalizarTexto(canalNome || alvo);
+      if (alvoTxt.includes('spx') || alvoTxt.includes('shopee')) {
+        found = nomes.find(n => {
+          const nn = normalizarTexto(n);
+          return nn.includes('spx') || nn.includes('shopee');
+        });
+        if (found) return found;
+      }
+      if (alvoTxt.includes('flex')) {
+        found = nomes.find(n => normalizarTexto(n).includes('flex'));
+        if (found) return found;
+      }
+      if (alvoTxt.includes('mercado') || alvoTxt.includes('coleta') || alvoTxt.includes('agencia')) {
+        found = nomes.find(n => {
+          const nn = normalizarTexto(n);
+          return (nn.includes('mercado') || nn.includes('coleta') || nn.includes('agencia')) && !nn.includes('flex');
+        });
+        if (found) return found;
+      }
+      return '';
+    }
+
+    function ehfAplicarBipagemResumoLojaCanal(b) {
+      if (!b) return false;
+      let lojaKey = normalizarLojaKey(b.lojaKey || b.loja || b.lojaNome || '');
+      const candidatosCanal = [
+        b.canalEsperado,
+        b.canalNome,
+        b.canal,
+        b.expectedChannelName,
+        b.actualChannelName,
+        b.plataforma,
+        ehfBipSession?.session?.channel_name
+      ].filter(Boolean);
+
+      // Se a leitura não veio vinculada a loja, tenta distribuir no canal com maior saldo restante.
+      if (!lojaKey || lojaKey === 'nao_localizada' || !ehfResumoLojaCanal[lojaKey]) {
+        let melhor = null;
+        Object.keys(ehfResumoLojaCanal || {}).forEach(k => {
+          const loja = ehfResumoLojaCanal[k] || {};
+          Object.keys(loja).forEach(canalNome => {
+            const bate = candidatosCanal.some(c => ehfEncontrarCanalResumoCompat(k, c) === canalNome);
+            if (!bate) return;
+            const esperado = Number(loja[canalNome].esperado || 0);
+            const bipado = Number(loja[canalNome].bipado || 0);
+            const restante = esperado - bipado;
+            if (!melhor || restante > melhor.restante) melhor = { lojaKey:k, canalNome, restante };
+          });
+        });
+        if (melhor && melhor.lojaKey && melhor.canalNome) {
+          ehfResumoLojaCanal[melhor.lojaKey][melhor.canalNome].bipado = Number(ehfResumoLojaCanal[melhor.lojaKey][melhor.canalNome].bipado || 0) + 1;
+          return true;
+        }
+        return false;
+      }
+
+      for (const c of candidatosCanal) {
+        const canalResumo = ehfEncontrarCanalResumoCompat(lojaKey, c);
+        if (canalResumo && ehfResumoLojaCanal[lojaKey][canalResumo]) {
+          ehfResumoLojaCanal[lojaKey][canalResumo].bipado = Number(ehfResumoLojaCanal[lojaKey][canalResumo].bipado || 0) + 1;
+          return true;
+        }
+      }
+
+      // Fallback: se a loja só tem um canal, contabiliza nele.
+      const canais = Object.keys(ehfResumoLojaCanal[lojaKey] || {});
+      if (canais.length === 1) {
+        ehfResumoLojaCanal[lojaKey][canais[0]].bipado = Number(ehfResumoLojaCanal[lojaKey][canais[0]].bipado || 0) + 1;
+        return true;
+      }
+      return false;
+    }
+
     function atualizarContagemBipadaNoResumo() {
       Object.keys(ehfResumoLojaCanal || {}).forEach(lojaKey => {
         Object.keys(ehfResumoLojaCanal[lojaKey] || {}).forEach(canalNome => ehfResumoLojaCanal[lojaKey][canalNome].bipado = 0);
       });
-      ehfBipagensCache.forEach(b => {
-        const lojaKey = normalizarLojaKey(b.lojaKey || b.loja || "");
-        const canalNome = normalizarCanalNome(b.canalEsperado || b.canalNome || "");
-        if (ehfResumoLojaCanal[lojaKey] && ehfResumoLojaCanal[lojaKey][canalNome]) ehfResumoLojaCanal[lojaKey][canalNome].bipado++;
+      const vistos = new Set();
+      (ehfBipagensCache || []).forEach(b => {
+        const code = String(b.codigoDuplicidade || b.codigoLimpo || b.idEtiqueta || b.codigoRastreio || b.codigo || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+        const key = code || String(b._firebaseKey || b.ts || Math.random());
+        if (vistos.has(key)) return;
+        vistos.add(key);
+        ehfAplicarBipagemResumoLojaCanal(b);
       });
     }
 
@@ -1816,22 +2085,42 @@ window.EHF_PANEL_RUNTIME_VERSION='4.2.40-DIA-INTELIGENCIA-BIPAGEM';
           ehfBipToast('Esta etiqueta já foi bipada nesta conferência.', true);
           return;
         }
-        const lookup = data.lookup || {};
+        let lookup = data.lookup || {};
+        const planilhaLookup = (!ehfLookupTemPedido(lookup) || Number(lookup.totalUnidades || 0) <= 0 || !lookup.lojaKey)
+          ? await ehfLookupPlanilhaBipagem(codigoOperacional)
+          : null;
+        lookup = ehfMesclarLookupBipagem(lookup, planilhaLookup);
+
+        const encontrouPedido = ehfLookupTemPedido(lookup);
         const infoOriginal = identificarEtiqueta(codigoOperacional);
         const actualChannel = data.actualChannel || {};
+        const semProdutoMasRastreioUtil = !encontrouPedido && ehfCodigoPareceOperacional(codigoOperacional);
         const infoEtiqueta = {
           ...infoOriginal,
           plataforma: actualChannel.platform || infoOriginal.plataforma,
           canal: actualChannel.code || infoOriginal.canal,
           canalNome: actualChannel.name || infoOriginal.canalNome,
-          idEtiqueta: lookup.codigoNormalizado || lookup.codigoLido || infoOriginal.idEtiqueta,
-          codigoRastreio: lookup.pedido?.codigoRastreamento || infoOriginal.codigoRastreio,
-          status: data.channelMatch ? 'Conferido' : 'Canal divergente',
-          observacao: data.channelMatch ? infoOriginal.observacao : `Selecionado ${data.expectedChannel?.name}; identificado ${actualChannel.name || 'outro canal'}`
+          idEtiqueta: lookup.codigoNormalizado || lookup.codigoLido || infoOriginal.idEtiqueta || codigoOperacional,
+          codigoRastreio: lookup.pedido?.codigoRastreamento || infoOriginal.codigoRastreio || codigoOperacional,
+          status: encontrouPedido ? (data.channelMatch ? 'Conferido' : 'Canal divergente') : 'Rastreio registrado',
+          observacao: encontrouPedido
+            ? (data.channelMatch ? infoOriginal.observacao : `Selecionado ${data.expectedChannel?.name}; identificado ${actualChannel.name || 'outro canal'}`)
+            : 'Código operacional útil registrado sem produto. Aguardando vínculo no worker/planilha.'
         };
-        const destino = lookup.lojaKey
-          ? { lojaKey: lookup.lojaKey, lojaNome: lookup.lojaNome || lookup.lojaKey, canalEsperado: ehfBipSession.session.channel_name, esperado: 0, bipado: 0, restante: 0 }
-          : escolherLojaParaBipagem(infoEtiqueta);
+        let destino = null;
+        const lookupLojaKey = normalizarLojaKey(lookup.lojaKey || lookup.loja || lookup.lojaNome || '');
+        if (encontrouPedido && lookupLojaKey && lookupLojaKey !== 'nao_localizada') {
+          destino = { lojaKey: lookupLojaKey, lojaNome: lookup.lojaNome || NOMES_LOJAS_BIPAGEM[lookupLojaKey] || lookup.lojaKey, canalEsperado: ehfBipSession.session.channel_name, esperado: 0, bipado: 0, restante: 0 };
+        } else {
+          destino = escolherLojaParaBipagem({ ...infoEtiqueta, canalNome: ehfBipSession?.session?.channel_name || infoEtiqueta.canalNome });
+        }
+        if ((!destino || destino.lojaKey === 'nao_localizada') && !semProdutoMasRastreioUtil) {
+          ehfDesmarcarCodigoBipadoLocal(codigoOperacional || codigoDigitado);
+          tocarSomConfirmacaoLeitura(false);
+          ehfBipToast('Código válido, mas sem vínculo suficiente para loja/pedido. Não entrou no romaneio.', true);
+          return;
+        }
+        if (!destino) destino = { lojaKey: 'nao_localizada', lojaNome: 'Não localizada', canalEsperado: ehfBipSession.session.channel_name, esperado: 0, bipado: 0, restante: -1 };
         const agora = Date.now();
         const novaBipagemRef = push(bipagemRef);
         const payloadBipagem = {
@@ -1855,9 +2144,13 @@ window.EHF_PANEL_RUNTIME_VERSION='4.2.40-DIA-INTELIGENCIA-BIPAGEM';
           operador: nomeOperadorLocal,
           coletor: ehfBipSession.session.collector_name,
           sessaoBipagemId: ehfBipSession.session.id,
-          pedidoTiny: lookup.pedido?.numero || '',
-          pedidoMarketplace: lookup.pedido?.numeroEcommerce || '',
-          totalUnidades: Number(lookup.totalUnidades || 0),
+          pedidoTiny: encontrouPedido ? (lookup.pedido?.numero || '') : '',
+          pedidoMarketplace: encontrouPedido ? (lookup.pedido?.numeroEcommerce || '') : '',
+          totalUnidades: encontrouPedido ? Number(lookup.totalUnidades || 0) : 0,
+          items: encontrouPedido && Array.isArray(lookup.items) ? lookup.items : [],
+          produtosResumo: encontrouPedido ? (lookup.produtosResumo || (Array.isArray(lookup.items) ? lookup.items.map(i => `${Number(i.quantity || i.quantidade || 1)}x ${i.description || i.descricao || i.sku || ''}`).join(' || ') : '')) : '',
+          lookupSource: encontrouPedido ? (lookup.source || (lookup.planilhaLookup ? 'planilha+worker' : 'worker')) : 'rastreio-only',
+          rastreioOnly: !encontrouPedido,
           horario: formatHorarioBrasilia(new Date(), true),
           horarioCompleto: formatHorarioBrasilia(new Date(), true),
           ts: agora
@@ -1867,7 +2160,7 @@ window.EHF_PANEL_RUNTIME_VERSION='4.2.40-DIA-INTELIGENCIA-BIPAGEM';
         tocarSomConfirmacaoLeitura(data.channelMatch !== false);
         const corStatus = data.channelMatch !== false ? '#5bae5f' : '#ef4444';
         set(alertaBroadcastRef, { txt: `O operador <b>${nomeOperadorLocal}</b> bipou: <b>${payloadBipagem.lojaNome}</b> — <b>${payloadBipagem.canalEsperado}</b> <span style="color:${corStatus};">(${payloadBipagem.status})</span><br>Pedido: <b>${payloadBipagem.pedidoMarketplace || payloadBipagem.pedidoTiny || '-'}</b> · Código: <b>${payloadBipagem.idEtiqueta || payloadBipagem.codigoRastreio || codigoDigitado}</b>`, ts: agora });
-        ehfBipToast(`${payloadBipagem.lojaNome} · pedido ${payloadBipagem.pedidoMarketplace || payloadBipagem.pedidoTiny || 'localizado'} · ${payloadBipagem.totalUnidades} unidade(s)`);
+        ehfBipToast(encontrouPedido ? `${payloadBipagem.lojaNome} · pedido ${payloadBipagem.pedidoMarketplace || payloadBipagem.pedidoTiny || 'localizado'} · ${payloadBipagem.totalUnidades} unidade(s)` : `${payloadBipagem.lojaNome} · rastreio registrado sem produto`);
         ehfAgendarAutosaveRomaneio('scan');
       } catch (error) {
         ehfDesmarcarCodigoBipadoLocal(codigoOperacional || codigoDigitado);
