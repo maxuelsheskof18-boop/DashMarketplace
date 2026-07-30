@@ -1,4 +1,4 @@
-window.EHF_PANEL_RUNTIME_VERSION='4.2.39-ROMANEIO-MINIMIZAR';
+window.EHF_PANEL_RUNTIME_VERSION='4.2.40-DIA-INTELIGENCIA-BIPAGEM';
 (function(){
   if (document.getElementById('ehf-bip-history-action-css')) return;
   const st = document.createElement('style');
@@ -1503,12 +1503,67 @@ window.EHF_PANEL_RUNTIME_VERSION='4.2.39-ROMANEIO-MINIMIZAR';
       return base;
     }
 
+
+    function ehfExtrairCodigoOperacional(rawValue) {
+      const original = String(rawValue || '').trim();
+      if (!original) return '';
+
+      let txt = original
+        .replace(/[\u0000-\u001F\u007F]/g, ' ')
+        .replace(/[“”]/g, '"')
+        .replace(/[‘’]/g, "'")
+        .trim();
+
+      function pick(re) {
+        const m = txt.match(re);
+        return m ? String(m[1] || m[0] || '').trim() : '';
+      }
+
+      // QR Mercado Livre em JSON real: {"id":"475...","t":"lm"} ou {"id":"475...","sender_id":...}
+      try {
+        const jsonStart = txt.indexOf('{');
+        const jsonEnd = txt.lastIndexOf('}');
+        if (jsonStart >= 0 && jsonEnd > jsonStart) {
+          const obj = JSON.parse(txt.slice(jsonStart, jsonEnd + 1));
+          if (obj && obj.id && /^\d{9,14}$/.test(String(obj.id))) return String(obj.id).trim();
+          if (obj && obj.codigoRastreamento) return String(obj.codigoRastreamento).trim().toUpperCase();
+          if (obj && obj.tracking_code) return String(obj.tracking_code).trim().toUpperCase();
+        }
+      } catch (_) {}
+
+      const patterns = [
+        /\b(MEL\d{8,20}[A-Z0-9]*)\b/i,
+        /\b(BR\d{10,}[A-Z0-9])\b/i,
+        /\b(TBR\d{8,})\b/i,
+        /\b(999\d{12,})\b/,
+        /\b(47\d{9,13})\b/,
+        /(?:\"id\"\s*:\s*\"?|\bid\b[^0-9]{0,8})(47\d{9,13})/i,
+        /(?:codigoRastreamento|tracking|trackingCode|codigo_rastreio|etiqueta|shipment)[^A-Za-z0-9]{0,12}([A-Z]{2}\d{8,}[A-Z0-9]|\d{10,})/i
+      ];
+
+      for (const re of patterns) {
+        const found = pick(re);
+        if (found) return found.toUpperCase();
+      }
+
+      const compact = txt.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+      if (/^BR\d{10,}[A-Z0-9]$/.test(compact)) return compact;
+      if (/^MEL\d{8,20}[A-Z0-9]*$/.test(compact)) return compact;
+      if (/^TBR\d{8,}$/.test(compact)) return compact;
+      if (/^999\d{12,}$/.test(compact)) return compact;
+      if (/^47\d{9,13}$/.test(compact)) return compact;
+
+      // Bloqueia leituras curtas/ruído de câmera para não virar "não localizada" no romaneio.
+      return '';
+    }
+
+    function ehfCodigoPareceOperacional(codigo) {
+      const c = String(codigo || '').trim().toUpperCase();
+      return /^(BR\d{10,}[A-Z0-9]|MEL\d{8,20}[A-Z0-9]*|47\d{9,13}|999\d{12,}|TBR\d{8,})$/.test(c);
+    }
+
     function limparCodigoBipado(codigoOriginal) {
-      return String(codigoOriginal || "")
-        .trim()
-        .replace(/\r/g, "")
-        .replace(/\n/g, "")
-        .replace(/\s+/g, "");
+      return ehfExtrairCodigoOperacional(codigoOriginal);
     }
 
     function normalizarTexto(txt) {
@@ -1582,6 +1637,11 @@ window.EHF_PANEL_RUNTIME_VERSION='4.2.39-ROMANEIO-MINIMIZAR';
       };
       if (!codigo) { resultado.observacao = "Código vazio"; return resultado; }
 
+      if (/^MEL47[0-9]{8,}/i.test(codigo)) {
+        const id = (codigo.match(/(47[0-9]{8,13})/) || [])[1] || codigo;
+        return { ...resultado, plataforma: "Mercado Livre", canal: "mercado_envios_coleta", canalNome: "Mercado Envios", idEtiqueta: id, codigoRastreio: id, tipo: "mercado_livre_coleta", status: "Conferido", observacao: "Código MEL Mercado Envios" };
+      }
+
       if (codigo.includes("sender_id") && codigo.includes("hash_code")) {
         const idMatch = codigo.match(/\^id\^Ç\^?([0-9]+)/i);
         const senderMatch = codigo.match(/sender_id\^Ç\^?([0-9]+)/i);
@@ -1608,7 +1668,7 @@ window.EHF_PANEL_RUNTIME_VERSION='4.2.39-ROMANEIO-MINIMIZAR';
 
       if (/^TBR[0-9]+$/i.test(codigo)) return { ...resultado, plataforma: "Amazon", canal: "amazon", canalNome: "Amazon DBA", codigoRastreio: codigo.toUpperCase(), idEtiqueta: codigo.toUpperCase(), tipo: "amazon", status: "Conferido", observacao: "Etiqueta Amazon" };
       if (/^999[0-9]{12,}$/.test(codigo)) return { ...resultado, plataforma: "TikTok", canal: "tiktok", canalNome: "TikTok Shipping", codigoRastreio: codigo, idEtiqueta: codigo, tipo: "tiktok", status: "Conferido", observacao: "Etiqueta TikTok" };
-      if (/^BR[0-9]{10,}[A-Z]$/i.test(codigo)) {
+      if (/^BR[0-9]{10,}[A-Z0-9]$/i.test(codigo)) {
         const c = resolverShopeeOuSpx(codigo);
         return { ...resultado, plataforma: c.plataforma, canal: c.canal, canalNome: c.canalNome, codigoRastreio: codigo.toUpperCase(), idEtiqueta: codigo.toUpperCase(), tipo: c.canal, status: "Conferido", observacao: c.observacao };
       }
@@ -1714,14 +1774,21 @@ window.EHF_PANEL_RUNTIME_VERSION='4.2.39-ROMANEIO-MINIMIZAR';
         return;
       }
       const input = document.getElementById('input-leitor-codigo');
-      const duplicada = ehfEncontrarBipagemDuplicadaNaSessao(codigoDigitado);
+      const codigoOperacional = ehfExtrairCodigoOperacional(codigoDigitado);
+      if (!codigoOperacional || !ehfCodigoPareceOperacional(codigoOperacional)) {
+        tocarSomConfirmacaoLeitura(false);
+        ehfBipToast('Leitura ignorada: a câmera/leitor capturou ruído ou código fora do padrão operacional.', true);
+        if (input) { input.value = ''; input.focus(); }
+        return;
+      }
+      const duplicada = ehfEncontrarBipagemDuplicadaNaSessao(codigoOperacional);
       if (duplicada) {
         tocarSomConfirmacaoLeitura(false);
         ehfBipToast('Etiqueta já bipada nesta conferência. Use Remover se foi bipe errado.', true);
         if (input) { input.value = ''; input.focus(); }
         return;
       }
-      ehfMarcarCodigoBipadoLocal(codigoDigitado);
+      ehfMarcarCodigoBipadoLocal(codigoOperacional);
       if (input) input.disabled = true;
       try {
         // Pré-resolução rápida: usa cache, atraso do Mercado Livre e, somente quando
@@ -1730,7 +1797,7 @@ window.EHF_PANEL_RUNTIME_VERSION='4.2.39-ROMANEIO-MINIMIZAR';
           ehfBipToast('Preparando etiqueta e produtos...');
           await ehfApi('/api/packing/preparar', {
             method: 'POST',
-            body: JSON.stringify({ codigo: codigoDigitado })
+            body: JSON.stringify({ codigo: codigoOperacional })
           });
         } catch (prepareError) {
           // Durante a ordem de deploy o Gateway antigo pode não possuir a rota.
@@ -1740,7 +1807,7 @@ window.EHF_PANEL_RUNTIME_VERSION='4.2.39-ROMANEIO-MINIMIZAR';
         }
         const data = await ehfApi(`/api/bipagem/sessoes/${ehfBipSession.session.id}/scan`, {
           method: 'POST',
-          body: JSON.stringify({ codigo: codigoDigitado, operator: nomeOperadorLocal })
+          body: JSON.stringify({ codigo: codigoOperacional, operator: nomeOperadorLocal })
         });
         ehfBipSession = data.session || ehfBipSession;
         ehfRenderBipSession(ehfBipSession);
@@ -1750,7 +1817,7 @@ window.EHF_PANEL_RUNTIME_VERSION='4.2.39-ROMANEIO-MINIMIZAR';
           return;
         }
         const lookup = data.lookup || {};
-        const infoOriginal = identificarEtiqueta(codigoDigitado);
+        const infoOriginal = identificarEtiqueta(codigoOperacional);
         const actualChannel = data.actualChannel || {};
         const infoEtiqueta = {
           ...infoOriginal,
@@ -1768,9 +1835,9 @@ window.EHF_PANEL_RUNTIME_VERSION='4.2.39-ROMANEIO-MINIMIZAR';
         const agora = Date.now();
         const novaBipagemRef = push(bipagemRef);
         const payloadBipagem = {
-          codigo: codigoDigitado,
-          codigoLimpo: infoEtiqueta.codigoLimpo || lookup.codigoNormalizado || codigoDigitado,
-          codigoDuplicidade: ehfBuildCodeVariantsForDuplicate(infoEtiqueta.codigoLimpo || lookup.codigoNormalizado || codigoDigitado)[0] || '',
+          codigo: codigoOperacional,
+          codigoLimpo: infoEtiqueta.codigoLimpo || lookup.codigoNormalizado || codigoOperacional,
+          codigoDuplicidade: ehfBuildCodeVariantsForDuplicate(infoEtiqueta.codigoLimpo || lookup.codigoNormalizado || codigoOperacional)[0] || '',
           plataforma: infoEtiqueta.plataforma,
           canal: infoEtiqueta.canal,
           canalNome: infoEtiqueta.canalNome,
@@ -1796,14 +1863,14 @@ window.EHF_PANEL_RUNTIME_VERSION='4.2.39-ROMANEIO-MINIMIZAR';
           ts: agora
         };
         await set(novaBipagemRef, payloadBipagem).catch(() => {});
-        ehfMarcarCodigoBipadoLocal(payloadBipagem.idEtiqueta || payloadBipagem.codigoRastreio || payloadBipagem.codigo || codigoDigitado);
+        ehfMarcarCodigoBipadoLocal(payloadBipagem.idEtiqueta || payloadBipagem.codigoRastreio || payloadBipagem.codigo || codigoOperacional);
         tocarSomConfirmacaoLeitura(data.channelMatch !== false);
         const corStatus = data.channelMatch !== false ? '#5bae5f' : '#ef4444';
         set(alertaBroadcastRef, { txt: `O operador <b>${nomeOperadorLocal}</b> bipou: <b>${payloadBipagem.lojaNome}</b> — <b>${payloadBipagem.canalEsperado}</b> <span style="color:${corStatus};">(${payloadBipagem.status})</span><br>Pedido: <b>${payloadBipagem.pedidoMarketplace || payloadBipagem.pedidoTiny || '-'}</b> · Código: <b>${payloadBipagem.idEtiqueta || payloadBipagem.codigoRastreio || codigoDigitado}</b>`, ts: agora });
         ehfBipToast(`${payloadBipagem.lojaNome} · pedido ${payloadBipagem.pedidoMarketplace || payloadBipagem.pedidoTiny || 'localizado'} · ${payloadBipagem.totalUnidades} unidade(s)`);
         ehfAgendarAutosaveRomaneio('scan');
       } catch (error) {
-        ehfDesmarcarCodigoBipadoLocal(codigoDigitado);
+        ehfDesmarcarCodigoBipadoLocal(codigoOperacional || codigoDigitado);
         const detail = error.data?.session;
         if (detail) ehfRenderBipSession(detail);
         tocarSomConfirmacaoLeitura(false);

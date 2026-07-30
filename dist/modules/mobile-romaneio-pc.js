@@ -1,7 +1,7 @@
 (function(){
   'use strict';
 
-  const VERSION = '4.2.39-ROMANEIO-MINIMIZAR';
+  const VERSION = '4.2.40-ROMANEIO-DIA-LIMPO';
   const MIN_KEY = 'ehf_romaneios_salvos_minimizado';
   const WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbwQ8-Rn-zZJQM0fLm9js3ErtJZefRnHP55E3M0r3Z_TIXS_skTioZ6p3yHqTLFYxPU9/exec';
 
@@ -24,6 +24,36 @@
   }
 
   function monthKey(date=new Date()){ return `${date.getFullYear()}_${String(date.getMonth()+1).padStart(2,'0')}`; }
+
+  function todayKey(){
+    const op = window.ehfDataOperacional || '';
+    if(/^\d{4}-\d{2}-\d{2}$/.test(String(op))) return String(op);
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  }
+  function compactDateKey(value){
+    if(!value) return '';
+    if(value instanceof Date && !isNaN(value.getTime())) return `${value.getFullYear()}-${String(value.getMonth()+1).padStart(2,'0')}-${String(value.getDate()).padStart(2,'0')}`;
+    const s=String(value);
+    const iso=s.match(/(20\d{2})[-/](\d{2})[-/](\d{2})/);
+    if(iso) return `${iso[1]}-${iso[2]}-${iso[3]}`;
+    const br=s.match(/(\d{2})\/(\d{2})\/(20\d{2})/);
+    if(br) return `${br[3]}-${br[2]}-${br[1]}`;
+    const filename=s.match(/(\d{2})(\d{2})(20\d{2})/);
+    if(filename) return `${filename[3]}-${filename[2]}-${filename[1]}`;
+    const d=new Date(s);
+    if(!isNaN(d.getTime())) return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+    return '';
+  }
+  function rowDateKey(row){
+    const r=normalizeRow(row);
+    return compactDateKey(r.fim) || compactDateKey(r.inicio) || compactDateKey(r.data) || compactDateKey(r.arquivo) || compactDateKey(r.key);
+  }
+  function filterRowsByOperationalDay(rows){
+    const day=todayKey();
+    return (rows||[]).filter(row=>rowDateKey(row) === day);
+  }
+
   function esc(v){ return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c])); }
   function number(v){ const n=Number(v||0); return Number.isFinite(n)?n:0; }
   function brDateTime(v){
@@ -220,7 +250,7 @@
     const bip=document.getElementById('view-bipagem'); if(!bip) return null;
     let panel=document.getElementById('ehf-romaneios-salvos-panel'); if(panel) return panel;
     panel=document.createElement('section'); panel.id='ehf-romaneios-salvos-panel'; panel.className='ehf-romaneios-panel';
-    panel.innerHTML=`<div class="ehf-romaneios-head"><div class="ehf-romaneios-titlebar"><div><h3>Romaneios salvos</h3><small>No mobile aparece resumo. No PC, atualize e imprima resumo ou lista completa.</small></div><button type="button" id="ehf-romaneio-toggle" class="ehf-romaneios-toggle">Minimizar</button></div><div class="ehf-romaneio-actions"><input id="ehf-romaneio-month" class="ehf-romaneio-month" value="${monthKey()}"><button type="button" id="ehf-romaneio-refresh" class="ehf-romaneio-btn secondary">Atualizar</button><button type="button" id="ehf-romaneio-save-now" class="ehf-romaneio-btn">Salvar atual</button></div></div><div id="ehf-romaneios-list" class="ehf-romaneios-list"><div class="ehf-romaneio-empty">Carregando romaneios...</div></div>`;
+    panel.innerHTML=`<div class="ehf-romaneios-head"><div class="ehf-romaneios-titlebar"><div><h3>Romaneios salvos</h3><small>Mostra somente o dia operacional. No PC, imprima resumo ou lista completa.</small></div><button type="button" id="ehf-romaneio-toggle" class="ehf-romaneios-toggle">Minimizar</button></div><div class="ehf-romaneio-actions"><input id="ehf-romaneio-month" class="ehf-romaneio-month" value="${monthKey()}"><button type="button" id="ehf-romaneio-refresh" class="ehf-romaneio-btn secondary">Atualizar</button><button type="button" id="ehf-romaneio-save-now" class="ehf-romaneio-btn">Salvar atual</button></div></div><div id="ehf-romaneios-list" class="ehf-romaneios-list"><div class="ehf-romaneio-empty">Carregando romaneios...</div></div>`;
     const session=document.getElementById('bip-session-panel');
     if(session && session.parentNode) session.parentNode.insertBefore(panel, session.nextSibling); else bip.prepend(panel);
     panel.querySelector('#ehf-romaneio-refresh')?.addEventListener('click',()=>loadRomaneios(true));
@@ -271,10 +301,10 @@
     const mes=(monthInput?.value||monthKey()).trim()||monthKey();
     list.innerHTML='<div class="ehf-romaneio-empty">Buscando romaneios na planilha...</div>';
     try{
-      const data=await jsonp('romaneios',{mes,limit:80});
+      const data=await jsonp('romaneios',{mes,limit:120,data:todayKey()});
       if(!data || data.ok===false) throw new Error(data?.error || data?.detail || 'Resposta inválida da planilha');
-      const rows=(data.rows||data.romaneios||[]).map(normalizeRow).sort((a,b)=>String(b.data||b.inicio||'').localeCompare(String(a.data||a.inicio||'')));
-      renderRows(rows, list, '');
+      const rows=filterRowsByOperationalDay((data.rows||data.romaneios||[]).map(normalizeRow)).sort((a,b)=>String(b.data||b.inicio||'').localeCompare(String(a.data||a.inicio||'')));
+      renderRows(rows, list, rows.length ? '' : 'Nenhum romaneio salvo para o dia operacional atual.');
     }catch(err){
       const local=readLocalFallback();
       renderRows(local, list, (err && err.message) ? err.message : 'Não consegui ler a planilha agora.');
