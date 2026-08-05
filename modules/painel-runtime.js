@@ -1,4 +1,4 @@
-window.EHF_PANEL_RUNTIME_VERSION='4.2.44-RESUMO-OPERACIONAL-DETALHADO';
+window.EHF_PANEL_RUNTIME_VERSION='4.2.47-RESOLVE-VIA-PACKING-PREPARAR';
 (function(){
   if (document.getElementById('ehf-bip-history-action-css')) return;
   const st = document.createElement('style');
@@ -7,7 +7,7 @@ window.EHF_PANEL_RUNTIME_VERSION='4.2.44-RESUMO-OPERACIONAL-DETALHADO';
   document.head.appendChild(st);
 })();
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-    import { getDatabase, ref, set, onValue, push } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
+    import { getDatabase, ref, set, update, onValue, push } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
 
     const firebaseConfig = {
       apiKey: "AIzaSyCcO-kwO-vIFs8x0zchjlyc1bsOxCLnhgs",
@@ -2019,8 +2019,31 @@ window.EHF_PANEL_RUNTIME_VERSION='4.2.44-RESUMO-OPERACIONAL-DETALHADO';
     }
 
     function escolherLojaParaBipagem(infoEtiqueta) {
-      const aliases = getAliasesCanal(infoEtiqueta.canalNome);
-      let melhor = { lojaKey: "nao_localizada", lojaNome: "Não localizada", canalEsperado: infoEtiqueta.canalNome, esperado: 0, bipado: 0, restante: -1 };
+      const canalAlvo = (ehfBipSession?.session?.channel_name || infoEtiqueta?.canalNome || '').trim();
+
+      // Fonte principal: o mesmo resumo operacional que aparece no card da bipagem.
+      // Isso é essencial quando o rastreio é válido, mas ainda não tem produtos/vínculo na planilha.
+      try {
+        if (typeof window.EHFEscolherLojaResumoOperacional === 'function') {
+          const escolhido = window.EHFEscolherLojaResumoOperacional(canalAlvo || infoEtiqueta?.canalNome || infoEtiqueta?.plataforma || '');
+          if (escolhido && escolhido.lojaKey && escolhido.lojaKey !== 'nao_localizada') {
+            return {
+              lojaKey: escolhido.lojaKey,
+              lojaNome: escolhido.lojaNome || NOMES_LOJAS_BIPAGEM[escolhido.lojaKey] || escolhido.lojaKey,
+              canalEsperado: escolhido.canalNome || canalAlvo || infoEtiqueta?.canalNome || '',
+              esperado: Number(escolhido.esperado || 0),
+              bipado: Number(escolhido.bipado || 0),
+              restante: Number(escolhido.restante || 0),
+              origemLoja: 'resumo_operacional_bipagem'
+            };
+          }
+        }
+      } catch (e) {
+        console.warn('[EHF] Falha ao escolher loja pelo resumo operacional:', e);
+      }
+
+      const aliases = getAliasesCanal(canalAlvo || infoEtiqueta.canalNome);
+      let melhor = { lojaKey: "nao_localizada", lojaNome: "Não localizada", canalEsperado: canalAlvo || infoEtiqueta.canalNome, esperado: 0, bipado: 0, restante: -1, origemLoja: 'fallback_interno' };
       Object.keys(ehfResumoLojaCanal || {}).forEach(lojaKey => {
         const canaisLoja = ehfResumoLojaCanal[lojaKey] || {};
         Object.keys(canaisLoja).forEach(canalNome => {
@@ -2030,10 +2053,143 @@ window.EHF_PANEL_RUNTIME_VERSION='4.2.44-RESUMO-OPERACIONAL-DETALHADO';
           const esperado = Number(canaisLoja[canalNome].esperado || 0);
           const bipado = Number(canaisLoja[canalNome].bipado || 0);
           const restante = esperado - bipado;
-          if (restante > melhor.restante) melhor = { lojaKey, lojaNome: NOMES_LOJAS_BIPAGEM[lojaKey] || lojaKey, canalEsperado: canalNome, esperado, bipado, restante };
+          if (restante > melhor.restante) melhor = { lojaKey, lojaNome: NOMES_LOJAS_BIPAGEM[lojaKey] || lojaKey, canalEsperado: canalNome, esperado, bipado, restante, origemLoja: 'resumo_interno' };
         });
       });
       return melhor;
+    }
+
+    function ehfStatusBipagemEhOk(status) {
+      const st = String(status || '').toLowerCase();
+      return st.includes('confer') || st.includes('rastreio') || st.includes('identific') || st.includes('aguardando');
+    }
+
+    function ehfCanalSessaoAtual() {
+      return String(ehfBipSession?.session?.channel_name || '').trim();
+    }
+
+    async function ehfResolverWorkerBipagemRapida(codigo, deep) {
+      const payload = { codigo, code: codigo, deep: Boolean(deep), background: true, source: 'DashMarketplace-bipagem' };
+      const q = `codigo=${encodeURIComponent(codigo)}${deep ? '&deep=1' : ''}`;
+
+      // 1) Rota nova, quando existir no vesco-separacao.
+      try {
+        return await ehfApi(`/api/bipagem/resolve?${q}`);
+      } catch (eResolve) {
+        const status = Number(eResolve?.status || eResolve?.response?.status || 0);
+        const notFound = status === 404 || String(eResolve?.message || '').includes('ROTA_NAO_ENCONTRADA') || String(eResolve?.error || '').includes('ROTA_NAO_ENCONTRADA');
+        if (!notFound) console.warn('[EHF] /api/bipagem/resolve falhou, usando /api/packing/preparar:', eResolve);
+      }
+
+      // 2) Rota que já existe no seu vesco-separacao atual e inicia lookup em segundo plano.
+      try {
+        return await ehfApi('/api/packing/preparar', { method: 'POST', body: JSON.stringify(payload) });
+      } catch (ePreparar) {
+        try {
+          return await ehfApi(`/api/packing/preparar?${q}`);
+        } catch (ePrepararGet) {
+          try {
+            return await ehfApi(`/api/embalagem/buscar?codigo=${encodeURIComponent(codigo)}`);
+          } catch (eBusca) {
+            eBusca.firstError = ePreparar;
+            eBusca.secondError = ePrepararGet;
+            throw eBusca;
+          }
+        }
+      }
+    }
+
+    function ehfLookupFromWorkerResolve(data) {
+      if (!data) return {};
+      if (data.lookup) return data.lookup;
+      return data;
+    }
+
+    function ehfMontarPatchDeLookup(lookup, planilhaLookup, codigoOperacional, basePayload, dataScan) {
+      lookup = ehfMesclarLookupBipagem(ehfLookupFromWorkerResolve(lookup), planilhaLookup);
+      const encontrouPedido = ehfLookupTemPedido(lookup);
+      const lookupLojaKey = normalizarLojaKey(lookup.lojaKey || lookup.loja || lookup.lojaNome || '');
+      const patch = {
+        codigo: codigoOperacional,
+        codigoLimpo: lookup.codigoNormalizado || lookup.codigoLido || codigoOperacional,
+        idEtiqueta: lookup.codigoNormalizado || lookup.codigoLido || basePayload.idEtiqueta || codigoOperacional,
+        codigoRastreio: lookup.pedido?.codigoRastreamento || basePayload.codigoRastreio || codigoOperacional,
+        enriquecidoEm: Date.now(),
+        enriquecidoEmTexto: formatHorarioBrasilia(new Date(), true)
+      };
+
+      if (encontrouPedido) {
+        const items = Array.isArray(lookup.items) ? lookup.items : [];
+        const totalUnidades = Number(lookup.totalUnidades || 0) || items.reduce((acc, it) => acc + Number(it.quantity || it.quantidade || 0), 0);
+        Object.assign(patch, {
+          lookupStatus: 'RESOLVIDO',
+          rastreioOnly: false,
+          lojaKey: lookupLojaKey && lookupLojaKey !== 'nao_localizada' ? lookupLojaKey : basePayload.lojaKey,
+          lojaNome: (lookupLojaKey && lookupLojaKey !== 'nao_localizada' ? (lookup.lojaNome || NOMES_LOJAS_BIPAGEM[lookupLojaKey] || lookupLojaKey) : basePayload.lojaNome),
+          pedidoTiny: lookup.pedido?.numero || lookup.tinyNumber || basePayload.pedidoTiny || '',
+          pedidoMarketplace: lookup.pedido?.numeroEcommerce || lookup.ecommerceOrderId || basePayload.pedidoMarketplace || '',
+          totalUnidades,
+          items,
+          produtosResumo: lookup.produtosResumo || (items.length ? items.map(i => `${Number(i.quantity || i.quantidade || 1)}x ${i.description || i.descricao || i.sku || ''}`).join(' || ') : basePayload.produtosResumo || ''),
+          status: dataScan && dataScan.channelMatch === false ? 'Canal divergente' : 'Conferido',
+          observacao: dataScan && dataScan.channelMatch === false
+            ? `Selecionado ${dataScan.expectedChannel?.name || basePayload.canalEsperado}; identificado ${dataScan.actualChannel?.name || 'outro canal'}`
+            : 'Pedido/produtos localizados em segundo plano.',
+          lookupSource: lookup.source || (lookup.planilhaLookup ? 'planilha+worker' : 'worker')
+        });
+      } else {
+        Object.assign(patch, {
+          lookupStatus: 'AGUARDANDO_VINCULO',
+          rastreioOnly: true,
+          status: 'Rastreio registrado',
+          observacao: 'Bipagem registrada rápido. Produto/pedido ainda sem vínculo no worker/planilha.'
+        });
+      }
+      return patch;
+    }
+
+    async function ehfEnriquecerBipagemEmSegundoPlano(firebaseKey, codigoOperacional, basePayload) {
+      const path = diaPath('bipagens_dia') + '/' + firebaseKey;
+      let workerLookup = null;
+      let scanData = null;
+      let planilhaLookup = null;
+
+      try {
+        // Primeiro tenta registrar no gateway/EasyPanel, mas sem bloquear a tela.
+        try {
+          scanData = await ehfApi(`/api/bipagem/sessoes/${ehfBipSession.session.id}/scan`, {
+            method: 'POST',
+            body: JSON.stringify({ codigo: codigoOperacional, operator: nomeOperadorLocal, modo: 'background' })
+          });
+          workerLookup = scanData.lookup || scanData;
+          if (scanData.session) ehfBipSession = scanData.session;
+        } catch (scanErr) {
+          // Se ainda não achou, pede preparação/indexação e continua pela planilha.
+          try { await ehfApi('/api/packing/preparar', { method:'POST', body: JSON.stringify({ codigo: codigoOperacional, background: true }) }); } catch (_) {}
+          try { workerLookup = await ehfResolverWorkerBipagemRapida(codigoOperacional, true); } catch (_) {}
+        }
+
+        // A planilha é a segunda fonte e costuma enriquecer quando o worker ainda não devolve produto.
+        try { planilhaLookup = await ehfLookupPlanilhaBipagem(codigoOperacional); } catch (_) {}
+
+        const patch = ehfMontarPatchDeLookup(workerLookup, planilhaLookup, codigoOperacional, basePayload, scanData);
+        await update(ref(db, path), patch).catch(async () => {
+          const atual = (ehfBipagensCache || []).find(b => b._firebaseKey === firebaseKey) || basePayload;
+          await set(ref(db, path), { ...atual, ...patch });
+        });
+
+        ehfAgendarAutosaveRomaneio('enriquecimento');
+        if (patch.lookupStatus === 'RESOLVIDO') {
+          ehfBipToast(`${patch.lojaNome || 'Pedido'} localizado em segundo plano${patch.pedidoMarketplace || patch.pedidoTiny ? ' · ' + (patch.pedidoMarketplace || patch.pedidoTiny) : ''}`);
+        }
+      } catch (err) {
+        console.warn('[EHF] Erro no enriquecimento de bipagem:', err);
+        update(ref(db, path), {
+          lookupStatus: 'ERRO_ENRIQUECIMENTO',
+          enriquecidoEm: Date.now(),
+          observacao: basePayload.observacao || 'Bipagem registrada, mas falhou a associação automática em segundo plano.'
+        }).catch(()=>{});
+      }
     }
 
     async function processarBipagem(codigoDigitado) {
@@ -2046,7 +2202,7 @@ window.EHF_PANEL_RUNTIME_VERSION='4.2.44-RESUMO-OPERACIONAL-DETALHADO';
       const codigoOperacional = ehfExtrairCodigoOperacional(codigoDigitado);
       if (!codigoOperacional || !ehfCodigoPareceOperacional(codigoOperacional)) {
         tocarSomConfirmacaoLeitura(false);
-        ehfBipToast('Leitura ignorada: a câmera/leitor capturou ruído ou código fora do padrão operacional.', true);
+        ehfBipToast('Leitura ignorada: use somente o código operacional da etiqueta.', true);
         if (input) { input.value = ''; input.focus(); }
         return;
       }
@@ -2057,117 +2213,59 @@ window.EHF_PANEL_RUNTIME_VERSION='4.2.44-RESUMO-OPERACIONAL-DETALHADO';
         if (input) { input.value = ''; input.focus(); }
         return;
       }
-      ehfMarcarCodigoBipadoLocal(codigoOperacional);
-      if (input) input.disabled = true;
-      try {
-        // Pré-resolução rápida: usa cache, atraso do Mercado Livre e, somente quando
-        // necessário, consulta o pedido exato no Tiny antes de registrar a bipagem.
-        try {
-          ehfBipToast('Preparando etiqueta e produtos...');
-          await ehfApi('/api/packing/preparar', {
-            method: 'POST',
-            body: JSON.stringify({ codigo: codigoOperacional })
-          });
-        } catch (prepareError) {
-          // Durante a ordem de deploy o Gateway antigo pode não possuir a rota.
-          // Nesse único caso continuamos pela leitura tradicional.
-          const message = String(prepareError.message || '');
-          if (!/404|Cannot POST|N[ÃA]O ENCONTRAD/i.test(message)) throw prepareError;
-        }
-        const data = await ehfApi(`/api/bipagem/sessoes/${ehfBipSession.session.id}/scan`, {
-          method: 'POST',
-          body: JSON.stringify({ codigo: codigoOperacional, operator: nomeOperadorLocal })
-        });
-        ehfBipSession = data.session || ehfBipSession;
-        ehfRenderBipSession(ehfBipSession);
-        if (data.duplicate) {
-          tocarSomConfirmacaoLeitura(false);
-          ehfBipToast('Esta etiqueta já foi bipada nesta conferência.', true);
-          return;
-        }
-        let lookup = data.lookup || {};
-        const planilhaLookup = (!ehfLookupTemPedido(lookup) || Number(lookup.totalUnidades || 0) <= 0 || !lookup.lojaKey)
-          ? await ehfLookupPlanilhaBipagem(codigoOperacional)
-          : null;
-        lookup = ehfMesclarLookupBipagem(lookup, planilhaLookup);
 
-        const encontrouPedido = ehfLookupTemPedido(lookup);
-        const infoOriginal = identificarEtiqueta(codigoOperacional);
-        const actualChannel = data.actualChannel || {};
-        const semProdutoMasRastreioUtil = !encontrouPedido && ehfCodigoPareceOperacional(codigoOperacional);
-        const infoEtiqueta = {
-          ...infoOriginal,
-          plataforma: actualChannel.platform || infoOriginal.plataforma,
-          canal: actualChannel.code || infoOriginal.canal,
-          canalNome: actualChannel.name || infoOriginal.canalNome,
-          idEtiqueta: lookup.codigoNormalizado || lookup.codigoLido || infoOriginal.idEtiqueta || codigoOperacional,
-          codigoRastreio: lookup.pedido?.codigoRastreamento || infoOriginal.codigoRastreio || codigoOperacional,
-          status: encontrouPedido ? (data.channelMatch ? 'Conferido' : 'Canal divergente') : 'Rastreio registrado',
-          observacao: encontrouPedido
-            ? (data.channelMatch ? infoOriginal.observacao : `Selecionado ${data.expectedChannel?.name}; identificado ${actualChannel.name || 'outro canal'}`)
-            : 'Código operacional útil registrado sem produto. Aguardando vínculo no worker/planilha.'
-        };
-        let destino = null;
-        const lookupLojaKey = normalizarLojaKey(lookup.lojaKey || lookup.loja || lookup.lojaNome || '');
-        if (encontrouPedido && lookupLojaKey && lookupLojaKey !== 'nao_localizada') {
-          destino = { lojaKey: lookupLojaKey, lojaNome: lookup.lojaNome || NOMES_LOJAS_BIPAGEM[lookupLojaKey] || lookup.lojaKey, canalEsperado: ehfBipSession.session.channel_name, esperado: 0, bipado: 0, restante: 0 };
-        } else {
-          destino = escolherLojaParaBipagem({ ...infoEtiqueta, canalNome: ehfBipSession?.session?.channel_name || infoEtiqueta.canalNome });
-        }
-        if ((!destino || destino.lojaKey === 'nao_localizada') && !semProdutoMasRastreioUtil) {
-          ehfDesmarcarCodigoBipadoLocal(codigoOperacional || codigoDigitado);
-          tocarSomConfirmacaoLeitura(false);
-          ehfBipToast('Código válido, mas sem vínculo suficiente para loja/pedido. Não entrou no romaneio.', true);
-          return;
-        }
-        if (!destino) destino = { lojaKey: 'nao_localizada', lojaNome: 'Não localizada', canalEsperado: ehfBipSession.session.channel_name, esperado: 0, bipado: 0, restante: -1 };
-        const agora = Date.now();
-        const novaBipagemRef = push(bipagemRef);
-        const payloadBipagem = {
-          codigo: codigoOperacional,
-          codigoLimpo: infoEtiqueta.codigoLimpo || lookup.codigoNormalizado || codigoOperacional,
-          codigoDuplicidade: ehfBuildCodeVariantsForDuplicate(infoEtiqueta.codigoLimpo || lookup.codigoNormalizado || codigoOperacional)[0] || '',
-          plataforma: infoEtiqueta.plataforma,
-          canal: infoEtiqueta.canal,
-          canalNome: infoEtiqueta.canalNome,
-          canalEsperado: ehfBipSession.session.channel_name,
-          lojaKey: destino.lojaKey,
-          lojaNome: destino.lojaNome,
-          esperadoCanalLoja: destino.esperado,
-          bipadoAntesCanalLoja: destino.bipado,
-          restanteAntesCanalLoja: destino.restante,
-          idEtiqueta: infoEtiqueta.idEtiqueta,
-          codigoRastreio: infoEtiqueta.codigoRastreio,
-          tipo: infoEtiqueta.tipo,
-          observacao: infoEtiqueta.observacao,
-          status: infoEtiqueta.status,
-          operador: nomeOperadorLocal,
-          coletor: ehfBipSession.session.collector_name,
-          sessaoBipagemId: ehfBipSession.session.id,
-          pedidoTiny: encontrouPedido ? (lookup.pedido?.numero || '') : '',
-          pedidoMarketplace: encontrouPedido ? (lookup.pedido?.numeroEcommerce || '') : '',
-          totalUnidades: encontrouPedido ? Number(lookup.totalUnidades || 0) : 0,
-          items: encontrouPedido && Array.isArray(lookup.items) ? lookup.items : [],
-          produtosResumo: encontrouPedido ? (lookup.produtosResumo || (Array.isArray(lookup.items) ? lookup.items.map(i => `${Number(i.quantity || i.quantidade || 1)}x ${i.description || i.descricao || i.sku || ''}`).join(' || ') : '')) : '',
-          lookupSource: encontrouPedido ? (lookup.source || (lookup.planilhaLookup ? 'planilha+worker' : 'worker')) : 'rastreio-only',
-          rastreioOnly: !encontrouPedido,
-          horario: formatHorarioBrasilia(new Date(), true),
-          horarioCompleto: formatHorarioBrasilia(new Date(), true),
-          ts: agora
-        };
-        await set(novaBipagemRef, payloadBipagem).catch(() => {});
-        ehfMarcarCodigoBipadoLocal(payloadBipagem.idEtiqueta || payloadBipagem.codigoRastreio || payloadBipagem.codigo || codigoOperacional);
-        tocarSomConfirmacaoLeitura(data.channelMatch !== false);
-        const corStatus = data.channelMatch !== false ? '#5bae5f' : '#ef4444';
-        set(alertaBroadcastRef, { txt: `O operador <b>${nomeOperadorLocal}</b> bipou: <b>${payloadBipagem.lojaNome}</b> — <b>${payloadBipagem.canalEsperado}</b> <span style="color:${corStatus};">(${payloadBipagem.status})</span><br>Pedido: <b>${payloadBipagem.pedidoMarketplace || payloadBipagem.pedidoTiny || '-'}</b> · Código: <b>${payloadBipagem.idEtiqueta || payloadBipagem.codigoRastreio || codigoDigitado}</b>`, ts: agora });
-        ehfBipToast(encontrouPedido ? `${payloadBipagem.lojaNome} · pedido ${payloadBipagem.pedidoMarketplace || payloadBipagem.pedidoTiny || 'localizado'} · ${payloadBipagem.totalUnidades} unidade(s)` : `${payloadBipagem.lojaNome} · rastreio registrado sem produto`);
-        ehfAgendarAutosaveRomaneio('scan');
+      // Mostra na tela imediatamente. A associação com pedido/produto roda depois.
+      ehfMarcarCodigoBipadoLocal(codigoOperacional);
+      const infoOriginal = identificarEtiqueta(codigoOperacional);
+      const destino = escolherLojaParaBipagem({ ...infoOriginal, canalNome: ehfCanalSessaoAtual() || infoOriginal.canalNome });
+      const agora = Date.now();
+      const novaBipagemRef = push(bipagemRef);
+      const payloadBipagem = {
+        codigo: codigoOperacional,
+        codigoLimpo: infoOriginal.codigoLimpo || codigoOperacional,
+        codigoDuplicidade: ehfBuildCodeVariantsForDuplicate(infoOriginal.codigoLimpo || codigoOperacional)[0] || '',
+        plataforma: infoOriginal.plataforma,
+        canal: infoOriginal.canal,
+        canalNome: infoOriginal.canalNome,
+        canalEsperado: ehfBipSession.session.channel_name,
+        lojaKey: destino?.lojaKey || 'aguardando_vinculo',
+        lojaNome: destino?.lojaNome || 'Aguardando loja',
+        origemLoja: destino?.origemLoja || 'previsao_resumo_operacional',
+        esperadoCanalLoja: destino?.esperado || 0,
+        bipadoAntesCanalLoja: destino?.bipado || 0,
+        restanteAntesCanalLoja: destino?.restante || 0,
+        idEtiqueta: infoOriginal.idEtiqueta || codigoOperacional,
+        codigoRastreio: infoOriginal.codigoRastreio || codigoOperacional,
+        tipo: infoOriginal.tipo,
+        status: 'Identificando',
+        lookupStatus: 'PENDENTE',
+        observacao: 'Bipagem registrada na hora. Associando pedido/produtos em segundo plano.',
+        operador: nomeOperadorLocal,
+        coletor: ehfBipSession.session.collector_name,
+        sessaoBipagemId: ehfBipSession.session.id,
+        pedidoTiny: '',
+        pedidoMarketplace: '',
+        totalUnidades: 0,
+        items: [],
+        produtosResumo: '',
+        lookupSource: 'instantaneo',
+        rastreioOnly: true,
+        horario: formatHorarioBrasilia(new Date(), true),
+        horarioCompleto: formatHorarioBrasilia(new Date(), true),
+        ts: agora
+      };
+
+      try {
+        await set(novaBipagemRef, payloadBipagem);
+        tocarSomConfirmacaoLeitura(true);
+        ehfBipToast(`${payloadBipagem.lojaNome} · leitura registrada. Buscando pedido/produtos...`);
+        set(alertaBroadcastRef, { txt: `O operador <b>${nomeOperadorLocal}</b> bipou: <b>${payloadBipagem.lojaNome}</b> — <b>${payloadBipagem.canalEsperado}</b><br>Código: <b>${payloadBipagem.idEtiqueta || payloadBipagem.codigoRastreio || codigoOperacional}</b>`, ts: agora }).catch(()=>{});
+        ehfAgendarAutosaveRomaneio('scan_instantaneo');
+        setTimeout(() => ehfEnriquecerBipagemEmSegundoPlano(novaBipagemRef.key, codigoOperacional, payloadBipagem), 50);
       } catch (error) {
         ehfDesmarcarCodigoBipadoLocal(codigoOperacional || codigoDigitado);
-        const detail = error.data?.session;
-        if (detail) ehfRenderBipSession(detail);
         tocarSomConfirmacaoLeitura(false);
-        ehfBipToast(error.message || 'Etiqueta não localizada.', true);
+        ehfBipToast('Falha ao registrar a leitura.', true);
       } finally {
         if (input) { input.disabled = false; input.value = ''; input.focus(); }
       }
@@ -2449,7 +2547,7 @@ window.EHF_PANEL_RUNTIME_VERSION='4.2.44-RESUMO-OPERACIONAL-DETALHADO';
         const canalNome = b.canalEsperado || b.canalNome || b.canal || "Desconhecido";
         const codigoPrincipal = b.idEtiqueta || b.codigoRastreio || b.codigo || "";
         const status = b.status || "Conferido";
-        const statusColor = status === "Conferido" ? "var(--success)" : "var(--danger)";
+        const statusColor = ehfStatusBipagemEhOk(status) ? "var(--success)" : "var(--danger)";
         const tr = document.createElement("tr");
         const removeKey = b._firebaseKey || '';
         tr.innerHTML = `<td>${b.horario || "--:--:--"}</td><td><b>${lojaNome}</b></td><td>${plataforma}</td><td>${canalNome}</td><td><b>${codigoPrincipal}</b><div style="font-size:10px;color:var(--muted);max-width:360px;overflow:hidden;text-overflow:ellipsis;">${b.observacao || ""}</div></td><td>${b.operador || "-"}</td><td style="color:${statusColor};font-weight:700;">${status}</td><td><button type="button" onclick="window.ehfRemoverBipagem && window.ehfRemoverBipagem('${ehfEscapeHtml(removeKey)}')" style="border:1px solid rgba(239,68,68,.55);background:rgba(239,68,68,.08);color:#fecaca;border-radius:7px;padding:5px 8px;font-size:10px;font-weight:900;cursor:pointer;">Remover</button></td>`;

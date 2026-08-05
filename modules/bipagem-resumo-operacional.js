@@ -1,4 +1,4 @@
-window.EHF_BIPAGEM_RESUMO_OPERACIONAL_VERSION = '4.2.44-RESUMO-OPERACIONAL-DETALHADO';
+window.EHF_BIPAGEM_RESUMO_OPERACIONAL_VERSION = '4.2.45-LOJA-ROMANEIO-RESUMO';
 (function(){
   'use strict';
 
@@ -244,13 +244,38 @@ window.EHF_BIPAGEM_RESUMO_OPERACIONAL_VERSION = '4.2.44-RESUMO-OPERACIONAL-DETAL
     });
   }
 
+  function escolherLojaOperacionalParaCanal(canalAlvo){
+    const op = applyBips(getOperational(), readBips());
+    const alvo = channelCanon(canalAlvo || '');
+    let melhor = null;
+    STORE_KEYS.forEach(sk => {
+      const store = op[sk];
+      if(!store) return;
+      STATUS_ORDER.forEach(status => {
+        (store.groups[status] || []).forEach(g => {
+          if(!channelMatches(g.name, alvo)) return;
+          const exp = n(g.expected), bip = n(g.bipado), restante = exp - bip;
+          const score = (restante > 0 ? restante : 0) * 1000 + exp;
+          if(!melhor || score > melhor.score){
+            melhor = { lojaKey: sk, lojaNome: store.name || STORE_NAMES[sk] || sk, canalNome: g.name, statusKey: status, esperado: exp, bipado: bip, restante, score };
+          }
+        });
+      });
+    });
+    return melhor || { lojaKey:'nao_localizada', lojaNome:'Não localizada', canalNome: canalAlvo || '', esperado:0, bipado:0, restante:0 };
+  }
+
   function applyBips(op, bips){
     Object.values(op).forEach(store => {
       store.last = '';
       STATUS_ORDER.forEach(sk => (store.groups[sk] || []).forEach(g => g.bipado = 0));
     });
     bips.forEach(b => {
-      const sk = b.loja;
+      let sk = b.loja;
+      if(!sk || sk === 'nao_localizada' || !op[sk]) {
+        const escolhido = escolherLojaOperacionalParaCanal(b.canal || b.plataforma || '');
+        sk = escolhido && escolhido.lojaKey !== 'nao_localizada' ? escolhido.lojaKey : '';
+      }
       if(!sk || sk === 'nao_localizada' || !op[sk]) return;
       let hit = null;
       STATUS_ORDER.forEach(status => {
@@ -327,9 +352,9 @@ window.EHF_BIPAGEM_RESUMO_OPERACIONAL_VERSION = '4.2.44-RESUMO-OPERACIONAL-DETAL
   }
 
   function injectStyle(){
-    if(document.getElementById('ehf-bipagem-resumo-operacional-v4244')) return;
+    if(document.getElementById('ehf-bipagem-resumo-operacional-v4245')) return;
     const st = document.createElement('style');
-    st.id = 'ehf-bipagem-resumo-operacional-v4244';
+    st.id = 'ehf-bipagem-resumo-operacional-v4245';
     st.textContent = `
       #resumo-bipagem-loja-canal{display:block!important}
       .ehf-op-clone-list{display:grid;gap:10px;width:100%}
@@ -364,6 +389,7 @@ window.EHF_BIPAGEM_RESUMO_OPERACIONAL_VERSION = '4.2.44-RESUMO-OPERACIONAL-DETAL
     window.addEventListener('ehf:romaneioAtualizado', schedule);
     window.addEventListener('ehf:estado-operacional', ev => { if(ev?.detail){ lastSummary = ev.detail.summary || ev.detail; schedule(); } });
     window.EHFRenderResumoOperacionalBipagem = render;
+    window.EHFEscolherLojaResumoOperacional = escolherLojaOperacionalParaCanal;
   }
   if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
   else boot();
