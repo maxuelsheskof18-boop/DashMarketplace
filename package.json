@@ -1,6 +1,6 @@
 {
   "name": "painel-vesco-separacao-vercel",
-  "version": "4.2.25",
+  "version": "4.2.51",
   "private": true,
   "scripts": {
     "build": "node build.js"

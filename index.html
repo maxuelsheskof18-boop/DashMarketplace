@@ -3257,7 +3257,7 @@
 
 <style id="ehf-v28-bipagem-style">
   @view-transition{navigation:auto}::view-transition-old(root){animation:ehfFadeOut .12s ease both}::view-transition-new(root){animation:ehfFadeIn .16s ease both}@keyframes ehfFadeOut{to{opacity:0;transform:translateY(3px)}}@keyframes ehfFadeIn{from{opacity:0;transform:translateY(3px)}}
-  .bip-session-panel{display:flex;align-items:center;justify-content:space-between;gap:14px;margin:0 0 14px;padding:14px 16px;border:1px solid rgba(255,138,0,.28);border-radius:14px;background:linear-gradient(110deg,rgba(255,138,0,.10),rgba(17,24,39,.78))}.bip-session-panel h3{margin:0 0 4px;font-size:14px}.bip-session-panel p{margin:0;color:var(--muted);font-size:10px}.bip-session-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.bip-session-pill{display:inline-flex;gap:6px;align-items:center;padding:7px 10px;border:1px solid rgba(255,255,255,.10);border-radius:999px;background:#0b0e12;font-size:10px;font-weight:850}.bip-session-pill strong{color:#ff9b22}.bip-session-btn{border:0;border-radius:9px;padding:9px 12px;font-size:10px;font-weight:900;cursor:pointer;background:#20252d;color:#fff}.bip-session-btn.primary{background:#ff8a00;color:#080808}.bip-session-btn.success{background:#27ae60}.bip-session-btn.danger{background:#b83232}.bip-session-btn:disabled{opacity:.45;cursor:not-allowed}
+  .bip-session-panel{display:flex;align-items:center;justify-content:space-between;gap:14px;margin:0 0 14px;padding:14px 16px;border:1px solid rgba(255,138,0,.28);border-radius:14px;background:linear-gradient(110deg,rgba(255,138,0,.10),rgba(17,24,39,.78))}.bip-session-panel h3{margin:0 0 4px;font-size:14px}.bip-session-panel p{margin:0;color:var(--muted);font-size:10px}.bip-session-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.bip-session-pill{display:inline-flex;gap:6px;align-items:center;padding:7px 10px;border:1px solid rgba(255,255,255,.10);border-radius:999px;background:#0b0e12;font-size:10px;font-weight:850}.bip-session-pill strong{color:#ff9b22}.bip-session-btn{border:0;border-radius:9px;padding:9px 12px;font-size:10px;font-weight:900;cursor:pointer;background:#20252d;color:#fff}.bip-session-btn.primary{background:#ff8a00;color:#080808}.bip-session-btn.success{background:#27ae60}.bip-session-btn.danger{background:#b83232}.bip-session-btn:disabled{opacity:.45;cursor:not-allowed}.bip-session-pill.fast-queue{border-color:rgba(59,130,246,.35);background:rgba(59,130,246,.08)}.bip-session-pill.fast-pending{border-color:rgba(255,138,0,.35);background:rgba(255,138,0,.08)}.bip-session-pill.fast-sheet{border-color:rgba(39,174,96,.35);background:rgba(39,174,96,.08)}.scan-status.busy{color:#ffb454!important;border-color:rgba(255,138,0,.45)!important}
   .bip-session-modal{position:fixed;inset:0;z-index:10050;background:rgba(0,0,0,.82);display:none;align-items:center;justify-content:center;padding:18px}.bip-session-modal.open{display:flex}.bip-session-dialog{width:min(560px,100%);border:1px solid rgba(255,138,0,.35);border-radius:16px;background:#0d1015;box-shadow:0 26px 90px rgba(0,0,0,.65);padding:20px}.bip-session-dialog h2{margin:0;font-size:20px}.bip-session-dialog>p{color:#8f98a5;font-size:11px;line-height:1.5}.bip-session-form{display:grid;grid-template-columns:1fr 1fr;gap:11px;margin-top:15px}.bip-session-field{display:grid;gap:6px}.bip-session-field.full{grid-column:1/-1}.bip-session-field label{font-size:9px;text-transform:uppercase;font-weight:900;color:#9ba4b1}.bip-session-field input,.bip-session-field select,.bip-session-field textarea{width:100%;background:#07090c;color:#fff;border:1px solid rgba(255,255,255,.12);border-radius:9px;padding:11px;outline:none}.bip-session-field input:focus,.bip-session-field select:focus,.bip-session-field textarea:focus{border-color:#ff8a00}.bip-session-modal-actions{display:flex;justify-content:flex-end;gap:9px;margin-top:16px}.bip-session-count{font-size:24px;font-weight:950;color:#ff8a00}.bip-scan-hero.session-locked{opacity:.55}.bip-scan-hero.session-locked input{pointer-events:none}.bip-session-warning{color:#ffc46b!important}.bip-session-success{color:#76dc98!important}
   @media(max-width:760px){.bip-session-panel{align-items:flex-start;flex-direction:column}.bip-session-actions{width:100%}.bip-session-btn{flex:1}.bip-session-form{grid-template-columns:1fr}}
 </style>
@@ -3764,6 +3764,9 @@ body[data-active-module="embalagem"] .top-counters,body[data-active-module="emba
         <div class="bip-session-actions">
           <span class="bip-session-pill">Pacotes <strong id="bip-session-packages">0</strong></span>
           <span class="bip-session-pill">Unidades <strong id="bip-session-units">0</strong></span>
+          <span class="bip-session-pill fast-queue">Fila <strong id="bip-session-queue">0</strong></span>
+          <span class="bip-session-pill fast-pending">Identificando <strong id="bip-session-pending">0</strong></span>
+          <span class="bip-session-pill fast-sheet">Planilha <strong id="bip-session-sheet">0</strong></span>
           <button id="btn-bip-session-start" class="bip-session-btn primary" type="button">Iniciar conferência</button>
           <button id="btn-bip-session-manifest" class="bip-session-btn" type="button" disabled>Romaneio</button>
           <button id="btn-bip-session-finish" class="bip-session-btn success" type="button" disabled>Finalizar</button>
@@ -3821,7 +3824,7 @@ body[data-active-module="embalagem"] .top-counters,body[data-active-module="emba
         <div class="input-bip-box bip-input-pro">
           <input type="text" id="input-leitor-codigo" placeholder="BIPE AQUI" autocomplete="off" autofocus>
         </div>
-        <div class="scan-hint">Ao entrar na aba Bipagem, o campo já fica pronto para leitura. No celular, toque neste campo e o leitor será acionado.</div>
+        <div class="scan-hint">Leitura rápida: o bip é salvo imediatamente, o campo é liberado na hora e o pedido é identificado em segundo plano. Duplicidades do dia são bloqueadas automaticamente.</div>
       </div>
 
       <section class="bip-kpi-grid">
@@ -5780,7 +5783,7 @@ document.addEventListener('DOMContentLoaded',()=>setTimeout(ehfApplyHashView,0))
     }
   </script>
 
-  <script type="module" src="modules/painel-runtime.js?v=4250"></script>
+  <script type="module" src="modules/painel-runtime.js?v=4251"></script>
 
 
   <script>
