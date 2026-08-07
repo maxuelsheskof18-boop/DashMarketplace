@@ -1,0 +1,6 @@
+VESCO SEPARAÇÃO V3.4.4 — DEPLOY DO PAINEL
+
+- Envie o conteúdo deste ZIP para a raiz do projeto do painel.
+- Não crie uma pasta adicional envolvendo os arquivos.
+- Após publicar, use Ctrl+F5.
+- O arquivo modules/painel-runtime.js deve carregar com ?v=344.

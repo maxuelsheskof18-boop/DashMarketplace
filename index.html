@@ -3,8 +3,8 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="ehf-build" content="3.4.2" />
   <meta name="view-transition" content="same-origin">
-  <meta name="vesco-version" content="4.2.31-DASHMARKETPLACE-GHPAGES">
   <title>Dashboard de Separação — EHF</title>
 
   
@@ -1654,6 +1654,34 @@
       margin-right: 6px;
     }
 
+    #ehf-sync-health.warn .status-dot {
+      background: #f59e0b;
+      box-shadow: 0 0 12px rgba(245,158,11,.9);
+    }
+
+    #ehf-sync-health.error .status-dot {
+      background: #ef4444;
+      box-shadow: 0 0 12px rgba(239,68,68,.9);
+    }
+
+    #ehf-sync-health.processing .status-dot {
+      background: #60a5fa;
+      box-shadow: 0 0 12px rgba(96,165,250,.9);
+      animation: ehfSyncPulse 1s ease-in-out infinite;
+    }
+
+    #ehf-sync-health {
+      line-height: 1.35;
+    }
+
+    #ehf-sync-health[title] {
+      cursor: help;
+    }
+
+    @keyframes ehfSyncPulse {
+      50% { opacity: .35; transform: scale(.78); }
+    }
+
     .topbar,
     .view-section {
       margin-left: 220px;
@@ -3211,52 +3239,19 @@
 
 <script>
 (function(){
-  const EHF_GATEWAY_BASE=(window.EHF_GATEWAY_BASE||'https://atendente-vesco-separacao.2cwhzy.easypanel.host').replace(/\/+$/,'');
-  const EHF_TINY_WORKER_BASE=(window.EHF_TINY_WORKER_BASE||localStorage.getItem('ehf_summary_api_base')||'https://atendente-vesco-tiny-worker.2cwhzy.easypanel.host').replace(/\/+$/,'');
+  const EHF_API_BASE='https://atendente-vesco-separacao.2cwhzy.easypanel.host';
   const nativeFetch=window.fetch.bind(window);
-
-  function rewriteEHFUrl(raw){
-    if(!raw) return raw;
-    const txt=String(raw);
-
-    // Rotas canônicas: sempre no cérebro (tiny-worker), mesmo que algum módulo tente chamar o gateway antigo.
-    const workerRelative=/^\/api\/(embalagem|packing|scan|summary|formasEnvio|admin\/reindex-aliases|admin\/purge-unsafe-aliases|embalagem\/registrar-alias|sync\/status|health)(\/|\?|$)/.test(txt);
-    if(workerRelative) return EHF_TINY_WORKER_BASE+txt;
-    if(/^\/(summary|formasEnvio)$/.test(txt)) return EHF_TINY_WORKER_BASE+txt;
-
-    // Demais rotas relativas continuam no gateway/vesco-separacao.
-    if(/^\/api\//.test(txt)) return EHF_GATEWAY_BASE+txt;
-
-    // Proteção contra chamadas absolutas antigas para o gateway.
-    // Tudo que é cérebro operacional/embalagem/bipagem deve ir para o tiny-worker.
-    try{
-      const u=new URL(txt);
-      const isGateway=u.hostname.includes('atendente-vesco-separacao');
-      const workerAbsolute=/^\/api\/(embalagem|packing|scan|summary|formasEnvio|admin\/reindex-aliases|admin\/purge-unsafe-aliases|admin\/mirror-planilha-now|embalagem\/registrar-alias|produtos|sync\/status|health)(\/|\?|$)/.test(u.pathname);
-      const isCanonical=['/summary','/formasEnvio'].includes(u.pathname) || workerAbsolute;
-      if(isGateway && isCanonical){
-        return EHF_TINY_WORKER_BASE+u.pathname+u.search;
-      }
-    }catch(_){}
-
-    return raw;
-  }
-
   window.fetch=function(input,init){
     try{
       const raw=typeof input==='string'?input:input?.url;
-      const target=rewriteEHFUrl(raw);
-      if(target!==raw){
-        return nativeFetch(target,{cache:'no-store',...(init||{})});
+      if(raw&&(/^\/api\//.test(raw)||raw==='/summary'||raw==='/formasEnvio'||raw==='/produtividade'||raw==='/marcadores'||raw==='/pedidos-atrasados'||raw==='/embalagem/buscar')){
+        const target=EHF_API_BASE+raw;
+        return nativeFetch(target,init);
       }
     }catch(_){}
     return nativeFetch(input,init);
   };
-
-  window.EHF_GATEWAY_BASE=EHF_GATEWAY_BASE;
-  window.EHF_TINY_WORKER_BASE=EHF_TINY_WORKER_BASE;
-  window.EHF_SUMMARY_API_BASE=EHF_TINY_WORKER_BASE;
-  window.EHF_API_BASE=EHF_GATEWAY_BASE;
+  window.EHF_API_BASE=EHF_API_BASE;
 })();
 </script>
 
@@ -3325,12 +3320,11 @@ body[data-active-module="embalagem"] .top-counters,body[data-active-module="emba
     .ml-deadline-panel{background:linear-gradient(180deg,#101010,#0b0b0b);border:1px solid rgba(255,138,0,.34);border-radius:14px;padding:16px;margin:14px 0;color:#fff}
     .ml-deadline-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:14px}.ml-deadline-head h3{margin:0 0 5px;font-size:15px}.ml-deadline-head p{margin:0;color:#9ca3af;font-size:11px;line-height:1.45}
     .ml-deadline-actions{display:flex;align-items:center;gap:9px;flex-wrap:wrap;justify-content:flex-end}.ml-source-badge{border:1px solid rgba(255,255,255,.12);background:#161b22;color:#cbd5e1;border-radius:999px;padding:7px 10px;font-size:10px;font-weight:800}.ml-source-badge.ok{color:#86efac;border-color:rgba(34,197,94,.35);background:rgba(34,197,94,.08)}.ml-source-badge.warn{color:#fbbf24;border-color:rgba(245,158,11,.4);background:rgba(245,158,11,.08)}
-    .ml-deadline-summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}.ml-account-card{background:#111722;border:1px solid rgba(255,255,255,.08);border-radius:12px;padding:12px;min-width:0}.ml-account-title{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px}.ml-account-title b{font-size:12px}.ml-account-title span{font-size:9px;font-weight:900;border-radius:999px;padding:4px 6px;background:rgba(255,255,255,.06);color:#94a3b8}.ml-account-title span.ok{color:#86efac;background:rgba(34,197,94,.1)}.ml-account-title span.warn{color:#fbbf24;background:rgba(245,158,11,.1)}
+    .ml-deadline-summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}.ml-account-card{background:#111722;border:1px solid rgba(255,255,255,.08);border-radius:12px;padding:12px;min-width:0}.ml-account-title{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px}.ml-account-title b{font-size:12px}.ml-account-title span{font-size:9px;font-weight:900;border-radius:999px;padding:4px 6px;background:rgba(255,255,255,.06);color:#94a3b8}.ml-account-title span.ok{color:#86efac;background:rgba(34,197,94,.1)}.ml-account-title span.warn{color:#fbbf24;background:rgba(245,158,11,.1)}.ml-account-error{margin:-4px 0 8px;color:#f87171;font-size:8px;line-height:1.25;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
     .ml-cutoff{display:flex;align-items:center;justify-content:space-between;padding:9px 10px;background:#080a0d;border:1px solid rgba(255,138,0,.22);border-radius:9px;margin-bottom:9px}.ml-cutoff small{font-size:9px;color:#94a3b8;text-transform:uppercase;font-weight:800}.ml-cutoff strong{font-size:20px;color:#ff8a00;letter-spacing:-.5px}.ml-cutoff strong.missing{font-size:12px;color:#64748b}
-    .ml-mode-grid{display:grid;grid-template-columns:1fr 1fr;gap:7px}.ml-mode{background:#0b0f15;border:1px solid rgba(255,255,255,.06);border-radius:9px;padding:8px}.ml-mode label{display:block;color:#94a3b8;font-size:9px;font-weight:900;text-transform:uppercase;margin-bottom:4px}.ml-mode b{font-size:18px}.ml-mode em{display:block;font-style:normal;color:#ef4444;font-size:9px;margin-top:3px;font-weight:800}.ml-mode em.warn{color:#fbbf24}.ml-count-pending{display:block;color:#fbbf24;font-size:8px;line-height:1.25;margin-top:2px;font-weight:700}.ml-deadline-status{margin-top:10px;color:#86efac;font-size:10px}.ml-deadline-status.warn{color:#fbbf24}.ml-deadline-status.error{color:#f87171}.ml-deadline-loading{grid-column:1/-1;color:#94a3b8;font-size:11px;padding:12px;text-align:center}
+    .ml-mode-grid{display:grid;grid-template-columns:1fr 1fr;gap:7px}.ml-mode{background:#0b0f15;border:1px solid rgba(255,255,255,.06);border-radius:9px;padding:8px}.ml-mode label{display:block;color:#94a3b8;font-size:9px;font-weight:900;text-transform:uppercase;margin-bottom:4px}.ml-mode b{font-size:18px}.ml-mode em{display:block;font-style:normal;color:#ef4444;font-size:9px;margin-top:3px;font-weight:800}.ml-mode em.warn{color:#fbbf24}.ml-count-pending{display:block;color:#fbbf24;font-size:8px;line-height:1.25;margin-top:2px;font-weight:700}.ml-queue-list{display:grid;gap:3px;margin-top:7px;padding-top:6px;border-top:1px solid rgba(255,255,255,.06)}.ml-queue-row{display:flex;justify-content:space-between;gap:5px;color:#94a3b8;font-size:8px;line-height:1.2}.ml-queue-row strong{color:#e2e8f0;font-size:8px}.ml-queue-row.danger strong{color:#fb7185}.ml-auth-code{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:-2px 0 9px;padding:7px 9px;border-radius:8px;background:rgba(37,99,235,.08);border:1px solid rgba(96,165,250,.18)}.ml-auth-code span{font-size:8px;color:#93c5fd;font-weight:800;text-transform:uppercase}.ml-auth-code b{font-size:13px;letter-spacing:.8px;color:#dbeafe}.ml-auth-code.missing{background:rgba(245,158,11,.06);border-color:rgba(245,158,11,.18)}.ml-auth-code.missing span{color:#fbbf24}.ml-auth-code.missing b{color:#fbbf24;font-size:10px;letter-spacing:0}.ml-deadline-status{margin-top:10px;color:#86efac;font-size:10px}.ml-deadline-status.warn{color:#fbbf24}.ml-deadline-status.error{color:#f87171}.ml-deadline-loading{grid-column:1/-1;color:#94a3b8;font-size:11px;padding:12px;text-align:center}
     @media(max-width:1100px){.ml-deadline-summary{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:650px){.ml-deadline-head{flex-direction:column}.ml-deadline-actions{justify-content:flex-start}.ml-deadline-summary{grid-template-columns:1fr}}
   </style>
-  <script>window.EHF_FRONTEND_PANEL_PACKAGE='4.2.23-PAINEL-REAL';document.documentElement.setAttribute('data-ehf-package','4.2.23');</script>
 </head>
 
 <body>
@@ -3387,7 +3381,7 @@ body[data-active-module="embalagem"] .top-counters,body[data-active-module="emba
     </nav>
 
     <div class="enterprise-sidebar-footer">
-      <div><span class="status-dot"></span> Sincronização online</div>
+      <div id="ehf-sync-health" class="ok" title="Aguardando a primeira leitura do servidor"><span class="status-dot"></span><span id="ehf-sync-health-text">Sincronização online</span></div>
       <div class="ehf-admin-live-badge">Configuração do Admin conectada</div>
       <small>Operação EHF</small>
     </div>
@@ -3398,7 +3392,7 @@ body[data-active-module="embalagem"] .top-counters,body[data-active-module="emba
       <div class="title">Dashboard de Separação — <span class="accent">EHF</span></div>
       <nav class="nav-tabs-main">
         <button class="tab-link active" data-view="view-coletas" onclick="switchMainView('view-coletas', event)">Painel</button>
-        <a class="tab-link" href="atrasados.html" data-page-link="atrasados">Atrasados</a>
+        <a class="tab-link" href="#atrasados" data-view="view-atrasados" onclick="switchMainView('view-atrasados', event)">Atrasados</a>
         <button class="tab-link" data-view="view-bipagem" onclick="switchMainView('view-bipagem', event)">Bipagem</button>
         <button class="tab-link" data-view="view-embalagem" onclick="switchMainView('view-embalagem', event)">Embalagem</button>
       </nav>
@@ -3854,8 +3848,8 @@ body[data-active-module="embalagem"] .top-counters,body[data-active-module="emba
       <section class="bip-pro-bottom">
         <div class="bip-pro-card bip-history-card">
           <div class="bip-history-topbar">
-            <h4>Romaneio em andamento</h4>
-            <div class="bip-history-hint">Leituras que entrarão no romaneio</div>
+            <h4>Histórico de leituras da sessão</h4>
+            <div class="bip-history-hint">Últimas leituras em ordem decrescente</div>
           </div>
 
           <div class="table-responsive">
@@ -3903,8 +3897,8 @@ body[data-active-module="embalagem"] .top-counters,body[data-active-module="emba
   <div id="view-atrasados" class="view-section ehf-module-view"><div id="ehf-atrasados-module" class="ehf-module-mount"></div></div>
   <div id="view-embalagem" class="view-section ehf-module-view"><div id="ehf-embalagem-module" class="ehf-module-mount"></div></div>
 
-  <script src="modules/atrasados.js?v=4247" defer></script>
-  <script src="modules/embalagem.js?v=4247" defer></script>
+  <script src="modules/atrasados.js?v=342" defer></script>
+  <script src="modules/embalagem.js?v=342" defer></script>
 
   <script>
 function toggleRow(key){const row=document.getElementById(`details-${key}`);if(row)row.classList.toggle('open')}
@@ -3920,7 +3914,7 @@ function switchMainView(viewId,event,options={}){
  const title=document.querySelector('.topbar .title');if(title)title.innerHTML=`${ehfViewTitle(target)} — <span class="accent">EHF</span>`;
  document.body.classList.remove('ehf-remote-ativa');document.body.classList.toggle('ehf-bipagem-ativa',target==='view-bipagem');
  document.body.dataset.activeModule=ehfViewHash(target);
- document.getElementById('bip-resumo-rapido-flutuante')?.remove();setTimeout(()=>window.ehfAtualizarVisibilidadePainelProducao?.(),0);
+ document.getElementById('bip-resumo-rapido-flutuante')?.remove();document.getElementById('painel-producao-flutuante')?.remove();
  if(!options.skipHash){const hash='#'+ehfViewHash(target);if(location.hash!==hash)history.pushState({view:target},'',hash)}
  if(target==='view-bipagem'){setTimeout(()=>{if(typeof window.ehfEnsureBipSession==='function')window.ehfEnsureBipSession();if(!window.ehfBipHasOpenSession&&typeof window.ehfOpenBipSessionSetup==='function')window.ehfOpenBipSessionSetup();const input=document.getElementById('input-leitor-codigo');if(input&&!input.disabled){input.focus();input.select()}if(typeof renderResumoBipagemPorLojaCanal==='function')renderResumoBipagemPorLojaCanal()},80)}
  if(target==='view-atrasados')window.EHFModules?.atrasados?.activate?.();
@@ -4073,7 +4067,7 @@ document.addEventListener('DOMContentLoaded',()=>setTimeout(ehfApplyHashView,0))
 
   <script>
     const BR_TIMEZONE = 'America/Sao_Paulo';
-    const SYNC_INTERVAL_MS = 60 * 1000;
+    const SYNC_INTERVAL_MS = 20 * 60 * 1000;
     const PRODUCTION_WINDOW_MS = 60 * 60 * 1000;
     const PRODUCTION_STORAGE_KEY = 'ehf_embaladas_snapshots_v1';
 
@@ -4288,8 +4282,7 @@ document.addEventListener('DOMContentLoaded',()=>setTimeout(ehfApplyHashView,0))
 
     (function() {
       const PROXY_BASE = '/api';
-      const API_BASE = (window.EHF_GATEWAY_BASE || 'https://atendente-vesco-separacao.2cwhzy.easypanel.host').replace(/\/+$/, '');
-      const SUMMARY_API_BASE = (window.EHF_SUMMARY_API_BASE || window.EHF_TINY_WORKER_BASE || 'https://atendente-vesco-tiny-worker.2cwhzy.easypanel.host').replace(/\/+$/, '');
+      const DEFAULT_API_BASE = 'https://atendente-vesco-separacao.2cwhzy.easypanel.host'; let API_BASE = (localStorage.getItem('ehf_worker_api_base') || DEFAULT_API_BASE).replace(/\/+$/, ''); try { const parsedApiBase = new URL(API_BASE); if (parsedApiBase.origin === location.origin || /\.vercel\.app$/i.test(parsedApiBase.hostname) || /github\.io$/i.test(parsedApiBase.hostname)) { API_BASE = DEFAULT_API_BASE; localStorage.setItem('ehf_worker_api_base', API_BASE); } } catch (_) { API_BASE = DEFAULT_API_BASE; }
       const WEB_APP_URL = API_BASE + '/exec';
 
       function appsScriptJsonp(action, params = {}, timeout = 30000) {
@@ -4439,23 +4432,58 @@ document.addEventListener('DOMContentLoaded',()=>setTimeout(ehfApplyHashView,0))
       async function fetchApiJson(paths, options = {}) {
         const candidates = Array.isArray(paths) ? paths : [paths];
         const failures = [];
+        const method = String(options.method || 'GET').toUpperCase();
 
         for (const path of candidates) {
-          // Primeiro tenta a API REST do Easypanel. O JSONP /exec permanece como fallback
-          // para preservar todas as funções antigas do painel.
+          // Primeiro tenta a API REST do Easypanel sem cache. O JSONP /exec permanece
+          // como fallback apenas para leituras GET antigas.
           try {
-            const absolute = /^https?:\/\//i.test(path) ? path : API_BASE + (String(path).startsWith('/') ? path : '/' + path);
+            let absolute = /^https?:\/\//i.test(path)
+              ? String(path)
+              : API_BASE + (String(path).startsWith('/') ? path : '/' + path);
+
+            if (method === 'GET') {
+              const url = new URL(absolute);
+              url.searchParams.set('_ts', String(Date.now()));
+              absolute = url.toString();
+            }
+
+            const headers = {
+              'Accept': 'application/json',
+              ...(options.headers || {})
+            };
+            if (method !== 'GET') {
+              const apiKey = localStorage.getItem('ehf_api_key') || '';
+              if (apiKey && !headers['x-api-key']) headers['x-api-key'] = apiKey;
+            }
+
             const response = await fetch(absolute, {
-              method: options.method || 'GET',
-              headers: { 'Accept': 'application/json', ...(options.headers || {}) },
+              method,
+              cache: 'no-store',
+              headers,
               body: options.body
             });
-            const contentType = String(response.headers.get('content-type') || '');
-            if (response.ok && contentType.includes('application/json')) {
-              return await response.json();
+
+            const raw = await response.text();
+            let data = null;
+            try {
+              data = raw ? JSON.parse(raw) : null;
+            } catch (_) {
+              throw new Error(`A rota ${path} devolveu uma resposta inválida.`);
             }
+
+            if (!response.ok) {
+              throw new Error(
+                data?.error ||
+                data?.message ||
+                `Erro HTTP ${response.status} em ${path}`
+              );
+            }
+
+            return data;
           } catch (restError) {
             failures.push(restError?.message || String(restError));
+            if (method !== 'GET') continue;
           }
 
           const mapped = mapApiPathToAppsScript(path);
@@ -4515,9 +4543,97 @@ document.addEventListener('DOMContentLoaded',()=>setTimeout(ehfApplyHashView,0))
 
         throw new Error(
           failures.join(' | ') ||
-          'Não foi possível acessar o Apps Script.'
+          'Não foi possível acessar a API do Easypanel.'
         );
       }
+
+      function setSyncHealth(mode = 'ok', message = 'Sincronização online', detail = '') {
+        const root = document.getElementById('ehf-sync-health');
+        const label = document.getElementById('ehf-sync-health-text');
+        if (!root || !label) return;
+        root.className = mode;
+        label.textContent = message;
+        root.title = detail || message;
+      }
+
+      function syncDateFromValue(value) {
+        const date = value ? new Date(value) : null;
+        return date && Number.isFinite(date.getTime()) ? date : null;
+      }
+
+      function updateSyncFreshness(value, successMessage = 'Sincronização online') {
+        const date = syncDateFromValue(value);
+        if (!date) {
+          setSyncHealth('warn', 'Sem confirmação de sincronização', 'O servidor ainda não informou a data da última atualização.');
+          return;
+        }
+        const ageSeconds = Math.max(0, Math.round((Date.now() - date.getTime()) / 1000));
+        if (ageSeconds > 180) {
+          setSyncHealth(
+            'warn',
+            'Dados desatualizados',
+            `O último snapshot confirmado pelo servidor tem ${ageSeconds} segundo(s).`
+          );
+        } else {
+          setSyncHealth('ok', successMessage, `Último snapshot confirmado em ${formatHorarioBrasilia(date)}.`);
+        }
+      }
+
+      const TINY_SUMMARY_CACHE_KEY = 'ehf_last_confirmed_tiny_summary_v344';
+
+      function summaryHasConfirmedData(data) {
+        const stores = data?.raw?.perStore || data?.perStore || {};
+        return Boolean(data && data.ready !== false && data.ts && Object.keys(stores).length > 0);
+      }
+
+      function saveConfirmedTinySummary(data) {
+        if (!summaryHasConfirmedData(data)) return;
+        try {
+          localStorage.setItem(TINY_SUMMARY_CACHE_KEY, JSON.stringify({ savedAt: Date.now(), data }));
+        } catch (_) {}
+      }
+
+      function loadConfirmedTinySummary() {
+        try {
+          const parsed = JSON.parse(localStorage.getItem(TINY_SUMMARY_CACHE_KEY) || 'null');
+          return summaryHasConfirmedData(parsed?.data) ? parsed : null;
+        } catch (_) {
+          return null;
+        }
+      }
+
+      function tinyFailureDetail(data) {
+        const accountErrors = Array.isArray(data?.accountErrors) ? data.accountErrors : [];
+        const accountText = accountErrors
+          .flatMap(account => (account.errors || []).map(error => `${account.label || account.key}: ${error}`))
+          .filter(Boolean)
+          .join(' | ');
+        return data?.syncError || accountText || data?.warning || 'O servidor ainda não publicou um snapshot completo do Tiny.';
+      }
+
+      function renderTinyUnavailable(data) {
+        ['total-a-separar', 'total-em-separacao', 'total-separadas', 'total-embaladas', 'remaining-to-pack']
+          .forEach(id => setText(id, '—'));
+
+        ACCOUNTS.forEach(acc => {
+          ['aguardando', 'separacao', 'separadas', 'embaladas', 'total']
+            .forEach(field => setText(`row-${acc.key}-${field}`, '—'));
+        });
+
+        const lastSync = document.getElementById('last-sync');
+        const lastSuccess = syncDateFromValue(data?.lastSuccessAt || data?.ts);
+        if (lastSync) {
+          lastSync.textContent = lastSuccess ? formatHorarioBrasilia(lastSuccess) : '--';
+          lastSync.title = lastSuccess
+            ? `Último snapshot completo: ${lastSuccess.toISOString()}`
+            : 'Nenhum snapshot completo do Tiny está disponível neste servidor.';
+        }
+
+        setSyncHealth('error', 'Tiny sem dados confirmados', tinyFailureDetail(data));
+      }
+
+      window.ehfSetSyncHealth = setSyncHealth;
+      window.ehfUpdateSyncFreshness = updateSyncFreshness;
 
       window.ehfAppsScriptJsonp = appsScriptJsonp;
       window.ehfFetchApiJson = fetchApiJson;
@@ -4693,57 +4809,18 @@ document.addEventListener('DOMContentLoaded',()=>setTimeout(ehfApplyHashView,0))
         renderSituacaoGroup(container, 'Embaladas / Checkout', mapaSituacoes.embaladas, storeKey);
       }
 
-      let ultimoEstadoOperacional = null;
-
-      async function buscarEstadoOperacional() {
-        try {
-          const estado = await fetchApiJson('/api/dashboard/bootstrap?limit=5000', {
-            timeout: 60000
-          });
-          ultimoEstadoOperacional = estado;
-          window.ehfEstadoOperacional = estado;
-          window.ehfSeparacoesComProdutos = Array.isArray(estado?.separacoes) ? estado.separacoes : [];
-          window.ehfPedidosAtrasados = Array.isArray(estado?.atrasados) ? estado.atrasados : [];
-          window.dispatchEvent(new CustomEvent('ehf:estado-operacional', { detail: estado }));
-          return estado;
-        } catch (error) {
-          console.warn('Bootstrap unificado indisponível; usando resumo simples:', error);
-          return null;
-        }
-      }
-
       async function buscarResumo() {
-        // Fonte única dos cards e status: tiny-worker.
-        // O gateway/vesco-separacao pode puxar pacotes, mas não pode sobrescrever o resumo canônico.
-        const data = await fetchApiJson(`${SUMMARY_API_BASE}/api/summary`, { noJsonp: true, timeout: 60000 });
-
-        // v4.2.7: o worker pode informar fallbackFrom quando consolida um snapshot vindo do app-state/planilha.
-        // Isso NÃO deve quebrar a tela se o payload já veio completo com total/mapped/perStore.
-        const temResumoUtil = !!(data && data.ok !== false && (data.mapped || data.perStore || data.raw?.perStore));
-        if (data?.fallbackFrom && temResumoUtil) {
-          console.warn('Resumo veio com fallbackFrom, mas será aceito por conter snapshot útil:', data.fallbackFrom);
-          data.__fallbackAceitoSemQuebrarCards = true;
-          return data;
-        }
-
-        if (data?.fallbackFrom && !temResumoUtil) {
-          throw new Error('Resumo rejeitado por fallback sem snapshot útil: '+data.fallbackFrom);
-        }
-
-        return data;
+        return fetchApiJson([
+          `${PROXY_BASE}/summary`,
+          '/summary'
+        ]);
       }
 
       async function buscarFormasEnvio() {
-        const data = await fetchApiJson(`${SUMMARY_API_BASE}/api/formasEnvio`, { noJsonp: true, timeout: 60000 });
-
-        // v4.2.7: formasEnvio de fallback não pode derrubar syncOnce.
-        // Se for fallback antigo, ignora e deixa os canais serem derivados do /api/summary.
-        if (data?.fallbackFrom === 'APP_STATE_SUMMARY_PLANILHA_LATEST') {
-          console.warn('FormasEnvio fallback ignorado sem quebrar sincronização:', data.fallbackFrom);
-          return null;
-        }
-
-        return data;
+        return fetchApiJson([
+          `${PROXY_BASE}/formasEnvio`,
+          '/formasEnvio'
+        ]);
       }
 
       async function buscarProdutividade() {
@@ -4759,11 +4836,6 @@ document.addEventListener('DOMContentLoaded',()=>setTimeout(ehfApplyHashView,0))
         if (!stores) return stores;
 
         if (!formasEnvioData || !formasEnvioData.formasEnvio) {
-          return stores;
-        }
-
-        if (formasEnvioData.fallbackFrom === 'APP_STATE_SUMMARY_PLANILHA_LATEST') {
-          console.warn('Ignorando formasEnvio do fallback antigo:', formasEnvioData.fallbackFrom);
           return stores;
         }
 
@@ -4786,94 +4858,30 @@ document.addEventListener('DOMContentLoaded',()=>setTimeout(ehfApplyHashView,0))
         return stores;
       }
 
-
-      function ehfNumeroOperacional(v) {
-        const n = Number(v || 0);
-        return Number.isFinite(n) ? n : 0;
-      }
-
-      function ehfNormalizarStoreOperacional(store) {
-        const out = {
-          ...(store || {}),
-          aguardando: ehfNumeroOperacional(store?.aguardando),
-          emSeparacao: ehfNumeroOperacional(store?.emSeparacao ?? store?.em_separacao ?? store?.em_separao),
-          separadas: ehfNumeroOperacional(store?.separadas),
-          embaladas: ehfNumeroOperacional(store?.embaladas)
-        };
-        out.total = ehfNumeroOperacional(store?.total);
-        if (!out.total) out.total = out.aguardando + out.emSeparacao + out.separadas + out.embaladas;
-        return out;
-      }
-
-      function ehfStoresDoSnapshot(data) {
-        const rawStores = data?.raw?.perStore || data?.perStore || data?.dbSnapshot?.perStore || data?.summary?.perStore || {};
-        const out = {};
-
-        Object.entries(rawStores || {}).forEach(([rawKey, store]) => {
-          const key = normalizeStoreKey(rawKey);
-          if (!key) return;
-          out[key] = ehfNormalizarStoreOperacional(store);
-        });
-
-        // Garante todas as contas conectadas na tela. A planilha não é fonte operacional aqui.
-        ACCOUNTS.forEach(acc => {
-          if (!out[acc.key]) {
-            out[acc.key] = ehfNormalizarStoreOperacional({});
-          }
-        });
-
-        return out;
-      }
-
-      function ehfTotaisDeTodasAsContas(stores) {
-        const totais = { aguardando: 0, emSeparacao: 0, separadas: 0, embaladas: 0, total: 0 };
-        const keys = new Set([...ACCOUNTS.map(a => a.key), ...Object.keys(stores || {})]);
-
-        keys.forEach(key => {
-          const store = ehfNormalizarStoreOperacional(stores?.[key] || {});
-          totais.aguardando += store.aguardando;
-          totais.emSeparacao += store.emSeparacao;
-          totais.separadas += store.separadas;
-          totais.embaladas += store.embaladas;
-        });
-
-        totais.total = totais.aguardando + totais.emSeparacao + totais.separadas + totais.embaladas;
-        return totais;
-      }
-
-      function ehfAplicarCardsOperacionaisTodasContas(stores) {
-        const totais = ehfTotaisDeTodasAsContas(stores);
-        setText('total-a-separar', totais.aguardando);
-        setText('total-em-separacao', totais.emSeparacao);
-        setText('total-separadas', totais.separadas);
-        setText('total-embaladas', totais.embaladas);
-
-        totalEmbaladasAcumuladoTiny = Number(totais.embaladas || 0);
-        lastSyncRemaining = Number(totais.aguardando || 0) + Number(totais.emSeparacao || 0) + Number(totais.separadas || 0);
-        setText('remaining-to-pack', lastSyncRemaining);
-
-        const elAuditTiny = document.getElementById('audit-tiny-total');
-        if (elAuditTiny) elAuditTiny.textContent = totalEmbaladasAcumuladoTiny;
-
-        return totais;
-      }
-
       async function syncOnce() {
         const btn = document.getElementById('btn-refresh');
 
-        if (btn) btn.textContent = 'Sincronizando...';
+        if (btn) {
+          btn.textContent = 'Sincronizando...';
+          btn.disabled = true;
+        }
 
         if (window.EHF_MARKER_FILTER_ACTIVE && typeof window.sincronizarFiltroMarcador === 'function') {
           try {
             await window.sincronizarFiltroMarcador();
           } finally {
-            if (btn) btn.textContent = 'Sincronizar';
+            if (btn) {
+              btn.textContent = 'Sincronizar';
+              btn.disabled = false;
+            }
           }
           return;
         }
 
         try {
-          const data = await buscarResumo();
+          let data = await buscarResumo();
+          const serverData = data;
+          let usingCachedSummary = false;
 
           let formasEnvioData = null;
           let produtividadeData = null;
@@ -4890,21 +4898,50 @@ document.addEventListener('DOMContentLoaded',()=>setTimeout(ehfApplyHashView,0))
             console.warn('Não foi possível buscar /produtividade:', e);
           }
 
-          if (!data) return;
+          if (!data) throw new Error('O servidor não devolveu o resumo operacional.');
 
-          if (!ehfPodeAplicarSnapshot(data)) return;
+          if (data.ready === false || !summaryHasConfirmedData(data)) {
+            const cached = loadConfirmedTinySummary();
+            if (cached?.data) {
+              data = cached.data;
+              usingCachedSummary = true;
+              const ageMinutes = Math.max(0, Math.round((Date.now() - Number(cached.savedAt || 0)) / 60000));
+              setSyncHealth(
+                'warn',
+                'Exibindo último snapshot salvo',
+                `${tinyFailureDetail(serverData)} Snapshot local salvo há ${ageMinutes} minuto(s).`
+              );
+            } else {
+              renderTinyUnavailable(serverData);
+              console.error('Tiny sem snapshot completo:', serverData);
+              return serverData;
+            }
+          } else {
+            saveConfirmedTinySummary(data);
+          }
 
-          let stores = ehfStoresDoSnapshot(data);
+          setText('total-a-separar', data.aguardando ?? 0);
+          setText('total-em-separacao', data.emSeparacao ?? 0);
+          setText('total-separadas', data.separadas ?? 0);
+          setText('total-embaladas', data.embaladas ?? 0);
 
-          stores = aplicarFormasEnvioNasLojas(stores, formasEnvioData);
-          stores = ehfMergeStoresNovas(stores);
-          const totaisOperacionais = ehfAplicarCardsOperacionaisTodasContas(stores);
+          totalEmbaladasAcumuladoTiny = Number(data.embaladas || 0);
 
           registrarSnapshotProducao(totalEmbaladasAcumuladoTiny);
+
+          const elAuditTiny = document.getElementById('audit-tiny-total');
+
+          if (elAuditTiny) {
+            elAuditTiny.textContent = totalEmbaladasAcumuladoTiny;
+          }
 
           if (typeof window.recalcularDivergenciaBipagem === 'function') {
             window.recalcularDivergenciaBipagem();
           }
+
+          let stores = data.raw?.perStore || data.perStore || {};
+
+          stores = aplicarFormasEnvioNasLojas(stores, formasEnvioData);
 
           ACCOUNTS.forEach(acc => {
             const store = stores[acc.key];
@@ -4918,23 +4955,41 @@ document.addEventListener('DOMContentLoaded',()=>setTimeout(ehfApplyHashView,0))
 
               buildRealTimeDetails(acc.key, store);
             } else {
-              // Não zera a loja quando uma leitura parcial vem sem ela; preserva último snapshot bom.
-              const previous = ehfLastGoodStores[acc.key];
-              if (previous) buildRealTimeDetails(acc.key, previous);
+              setText(`row-${acc.key}-aguardando`, 0);
+              setText(`row-${acc.key}-separacao`, 0);
+              setText(`row-${acc.key}-separadas`, 0);
+              setText(`row-${acc.key}-embaladas`, 0);
+              setText(`row-${acc.key}-total`, 0);
             }
           });
+
+          lastSyncRemaining =
+            Number(data.aguardando || 0) +
+            Number(data.emSeparacao || 0) +
+            Number(data.separadas || 0);
+
+          setText('remaining-to-pack', lastSyncRemaining);
 
           recalcularETALocal();
 
           const lastSync = document.getElementById('last-sync');
+          const serverSyncDate = syncDateFromValue(data.ts);
 
           if (lastSync) {
-            const syncMs = ehfSnapshotMs(data);
-            lastSync.textContent = formatHorarioBrasilia(syncMs ? new Date(syncMs) : new Date());
-            lastSync.title = 'Último snapshot operacional aceito';
+            lastSync.textContent = serverSyncDate
+              ? formatHorarioBrasilia(serverSyncDate)
+              : '--';
+            lastSync.title = serverSyncDate
+              ? `Horário confirmado pelo servidor: ${serverSyncDate.toISOString()}`
+              : 'O servidor não informou o horário do snapshot.';
           }
 
-          console.log('Resumo recebido:', data);
+          if (!usingCachedSummary) {
+            updateSyncFreshness(data.ts);
+          }
+
+          console.log('Resumo recebido:', serverData);
+          if (usingCachedSummary) console.warn('Snapshot do Tiny indisponível; exibindo cache local:', data);
           console.log('Formas de envio recebidas:', formasEnvioData);
           console.log('Stores finais usados na tela:', stores);
 
@@ -4943,87 +4998,70 @@ document.addEventListener('DOMContentLoaded',()=>setTimeout(ehfApplyHashView,0))
           }
 
           if (window.ehfProducaoAdmin) {
-            if (typeof window.ehfRenderPainelProducao === 'function') {
-              window.ehfRenderPainelProducao(
+            if (typeof renderPainelProducaoFlutuante === 'function') {
+              renderPainelProducaoFlutuante(
                 window.ehfProducaoAdmin,
                 window.ehfRotinaAdmin
               );
             }
           }
 
+          return data;
         } catch (e) {
           console.error('Erro ao sincronizar:', e);
+          setSyncHealth('error', 'Falha na sincronização', e?.message || String(e));
+          throw e;
+        } finally {
+          if (btn) {
+            btn.textContent = 'Sincronizar';
+            btn.disabled = false;
+          }
         }
-
-        if (btn) btn.textContent = 'Sincronizar';
       }
 
 
       let ehfRealtimeSummaryBusy = false;
       let ehfRealtimeLastTs = '';
-      let ehfLastOperationalSnapshotMs = 0;
-      let ehfLastGoodStores = {};
-
-      function ehfSnapshotMs(data) {
-        const d = data?.ts || data?.time || data?.updatedAt || data?.atualizadoEm;
-        const ms = d ? new Date(d).getTime() : 0;
-        return Number.isFinite(ms) ? ms : 0;
-      }
-
-      function ehfPodeAplicarSnapshot(data) {
-        if (!data || data.ok === false) return false;
-        // v4.2.7: não rejeita automaticamente APP_STATE_SUMMARY_PLANILHA_LATEST quando o payload
-        // veio completo pelo tiny-worker. Só bloqueia snapshot vazio/inútil.
-        if (data.fallbackFrom === 'APP_STATE_SUMMARY_PLANILHA_LATEST' && !(data.mapped || data.perStore || data.raw?.perStore)) return false;
-        const hasNumbers = ['aguardando','emSeparacao','separadas','embaladas'].some(k => data[k] !== undefined && data[k] !== null);
-        const hasStores = !!(data?.raw?.perStore || data?.perStore);
-        if (!hasNumbers && !hasStores) return false;
-        const ms = ehfSnapshotMs(data);
-        if (ms && ehfLastOperationalSnapshotMs && ms + 1000 < ehfLastOperationalSnapshotMs) return false;
-        if (ms) ehfLastOperationalSnapshotMs = Math.max(ehfLastOperationalSnapshotMs, ms);
-        return true;
-      }
-
-      function ehfMergeStoresNovas(stores) {
-        const clean = {};
-        Object.entries(stores || {}).forEach(([k, v]) => {
-          const key = normalizeStoreKey(k);
-          if (!key) return;
-          clean[key] = ehfNormalizarStoreOperacional(v);
-          ehfLastGoodStores[key] = clean[key];
-        });
-        ACCOUNTS.forEach(acc => {
-          if (!clean[acc.key] && ehfLastGoodStores[acc.key]) clean[acc.key] = ehfLastGoodStores[acc.key];
-          if (!clean[acc.key]) clean[acc.key] = ehfNormalizarStoreOperacional({});
-        });
-        return { ...ehfLastGoodStores, ...clean };
-      }
 
       function aplicarResumoTempoReal(data) {
-        if (!ehfPodeAplicarSnapshot(data)) return;
+        if (!data || data.ok === false) return;
+        if (data.ready === false || !summaryHasConfirmedData(data)) {
+          setSyncHealth('warn', 'Aguardando snapshot completo do Tiny', tinyFailureDetail(data));
+          return;
+        }
+        saveConfirmedTinySummary(data);
         const ts = String(data.ts || '');
         if (ts && ts === ehfRealtimeLastTs) return;
         ehfRealtimeLastTs = ts || ehfRealtimeLastTs;
 
-        const stores = ehfMergeStoresNovas(ehfStoresDoSnapshot(data));
-        const totaisOperacionais = ehfAplicarCardsOperacionaisTodasContas(stores);
+        setText('total-a-separar', data.aguardando ?? 0);
+        setText('total-em-separacao', data.emSeparacao ?? 0);
+        setText('total-separadas', data.separadas ?? 0);
+        setText('total-embaladas', data.embaladas ?? 0);
+        totalEmbaladasAcumuladoTiny = Number(data.embaladas || 0);
+        lastSyncRemaining = Number(data.aguardando || 0) + Number(data.emSeparacao || 0) + Number(data.separadas || 0);
+        setText('remaining-to-pack', lastSyncRemaining);
+
+        const stores = data.raw?.perStore || data.perStore || {};
         ACCOUNTS.forEach(acc => {
           const store = stores[acc.key];
-          if (!store) return;
-          setText(`row-${acc.key}-aguardando`, Number(store.aguardando || 0));
-          setText(`row-${acc.key}-separacao`, Number(store.emSeparacao || 0));
-          setText(`row-${acc.key}-separadas`, Number(store.separadas || 0));
-          setText(`row-${acc.key}-embaladas`, Number(store.embaladas || 0));
-          setText(`row-${acc.key}-total`, Number(store.total || 0));
-          buildRealTimeDetails(acc.key, store);
+          setText(`row-${acc.key}-aguardando`, Number(store?.aguardando || 0));
+          setText(`row-${acc.key}-separacao`, Number(store?.emSeparacao || 0));
+          setText(`row-${acc.key}-separadas`, Number(store?.separadas || 0));
+          setText(`row-${acc.key}-embaladas`, Number(store?.embaladas || 0));
+          setText(`row-${acc.key}-total`, Number(store?.total || 0));
+          if (store) buildRealTimeDetails(acc.key, store);
         });
 
         const lastSync = document.getElementById('last-sync');
         if (lastSync) {
-          const date = ts ? new Date(ts) : new Date();
-          lastSync.textContent = formatHorarioBrasilia(date);
-          lastSync.title = 'Contagem operacional atualizada automaticamente';
+          const date = syncDateFromValue(ts);
+          lastSync.textContent = date ? formatHorarioBrasilia(date) : '--';
+          lastSync.title = date
+            ? `Contagem operacional confirmada pelo servidor: ${date.toISOString()}`
+            : 'O servidor não informou o horário do snapshot.';
         }
+        updateSyncFreshness(ts);
         recalcularETALocal();
         registrarSnapshotProducao(totalEmbaladasAcumuladoTiny);
         if (typeof window.recalcularDivergenciaBipagem === 'function') window.recalcularDivergenciaBipagem();
@@ -5042,13 +5080,16 @@ document.addEventListener('DOMContentLoaded',()=>setTimeout(ehfApplyHashView,0))
       }
 
       function iniciarCanalResumoTempoReal() {
-        // Desabilitado SSE do gateway antigo: ele entregava snapshot parcial e causava oscilação.
-        // A atualização em tempo real agora consulta somente o /api/summary canônico do tiny-worker.
-        if (window.ehfSummaryEventSource) {
-          try { window.ehfSummaryEventSource.close(); } catch (_) {}
-          window.ehfSummaryEventSource = null;
-        }
-        setInterval(sincronizarResumoTempoReal, 30000);
+        try {
+          const source = new EventSource(`${API_BASE}/api/events/summary`);
+          source.addEventListener('summary', (event) => {
+            try { aplicarResumoTempoReal(JSON.parse(event.data)); } catch (_) { sincronizarResumoTempoReal(); }
+          });
+          source.onerror = () => {};
+          window.ehfSummaryEventSource = source;
+        } catch (_) {}
+        // Fallback para redes/proxies que interrompem SSE.
+        setInterval(sincronizarResumoTempoReal, 3000);
       }
 
 
@@ -5323,180 +5364,14 @@ document.addEventListener('DOMContentLoaded',()=>setTimeout(ehfApplyHashView,0))
       }
 
 
-
-      function ehfNovoCanalAccumulator() {
-        return { FLEX: 0, COLETA: 0, SHOPEE: 0, TIKTOK: 0, AMAZON: 0, MAGALU: 0, TRANSPORTADORA: 0, CORREIOS: 0, RETIRADA: 0, NAO_IDENTIFICADO: 0 };
-      }
-
-      const EHF_FORMA_ENVIO_CANAL_POR_CONTA = {
-        comercio: {
-          '769570519': 'COLETA',
-          '778029845': 'SHOPEE',
-          '780391986': 'FLEX',
-          '849173976': 'AMAZON',
-          '850044775': 'MAGALU',
-          '852535843': 'TRANSPORTADORA',
-          '854284026': 'TIKTOK',
-          '860463094': 'RETIRADA',
-          '747632293': 'CORREIOS',
-          '747632297': 'TRANSPORTADORA',
-          '747632298': 'RETIRADA'
-        },
-        suprimentos: {
-          '772849381': 'COLETA',
-          '778034480': 'SHOPEE',
-          '780375701': 'FLEX',
-          '849173976': 'AMAZON',
-          '850044775': 'MAGALU',
-          '852535843': 'TRANSPORTADORA',
-          '854284026': 'TIKTOK',
-          '860463094': 'RETIRADA',
-          '747632293': 'CORREIOS',
-          '747632297': 'TRANSPORTADORA',
-          '747632298': 'RETIRADA'
-        },
-        distribuidora: {
-          '778095610': 'SHOPEE',
-          '847199235': 'COLETA',
-          '780391986': 'FLEX',
-          '849173976': 'AMAZON',
-          '850044775': 'MAGALU',
-          '852535843': 'TRANSPORTADORA',
-          '854284026': 'TIKTOK',
-          '860463094': 'RETIRADA',
-          '747632293': 'CORREIOS',
-          '747632297': 'TRANSPORTADORA',
-          '747632298': 'RETIRADA'
-        },
-        ekn: {}
-      };
-
-      function ehfCanalPorIdFormaEnvio(rawId, storeKey) {
-        const id = String(rawId ?? '').trim();
-        if (!id) return null;
-        const loja = normalizeStoreKey(storeKey || '');
-        const porConta = EHF_FORMA_ENVIO_CANAL_POR_CONTA[loja] || {};
-        if (porConta[id]) return porConta[id];
-        const geral = {
-          '769570519': 'COLETA',
-          '772849381': 'COLETA',
-          '847199235': 'COLETA',
-          '778029845': 'SHOPEE',
-          '778034480': 'SHOPEE',
-          '778095610': 'SHOPEE',
-          '780391986': 'FLEX',
-          '780375701': 'FLEX',
-          '849173976': 'AMAZON',
-          '850044775': 'MAGALU',
-          '852535843': 'TRANSPORTADORA',
-          '854284026': 'TIKTOK',
-          '860463094': 'RETIRADA',
-          '747632293': 'CORREIOS',
-          '747632297': 'TRANSPORTADORA',
-          '747632298': 'RETIRADA'
-        };
-        return geral[id] || null;
-      }
-
-      function ehfNormalizarCanalNome(rawKey) {
-        const key = String(rawKey || '').toUpperCase();
-        if (!key) return 'NAO_IDENTIFICADO';
-        if (key.includes('FLEX')) return 'FLEX';
-        if (key.includes('COLETA') || key.includes('MERCADO ENVIOS') || key === 'ML' || key.includes('AGENCIA') || key.includes('AGÊNCIA')) return 'COLETA';
-        if (key.includes('SHOPEE') || key.includes('SPX')) return 'SHOPEE';
-        if (key.includes('TIKTOK')) return 'TIKTOK';
-        if (key.includes('AMAZON')) return 'AMAZON';
-        if (key.includes('MAGALU')) return 'MAGALU';
-        if (key.includes('CORREIO')) return 'CORREIOS';
-        if (key.includes('RETIR')) return 'RETIRADA';
-        if (key.includes('TRANSPORT') || key.includes('LOGGI')) return 'TRANSPORTADORA';
-        return 'NAO_IDENTIFICADO';
-      }
-
-      function ehfNormalizarCanalCountsObj(obj, storeKey) {
-        const out = ehfNovoCanalAccumulator();
-        if (!obj || typeof obj !== 'object') return out;
-        Object.entries(obj).forEach(([rawKey, rawValue]) => {
-          const value = Number(rawValue || 0);
-          if (!Number.isFinite(value) || value === 0) return;
-          const canal = ehfCanalPorIdFormaEnvio(rawKey, storeKey) || ehfNormalizarCanalNome(rawKey);
-          out[canal] = Number(out[canal] || 0) + value;
-        });
-        return out;
-      }
-
-      function ehfSomarCanalCounts(dest, src) {
-        Object.keys(dest).forEach(k => { dest[k] += Number(src?.[k] || 0); });
-        return dest;
-      }
-
-      function ehfSomarSituacaoEnvioCounts(store, storeKey) {
-        const out = ehfNovoCanalAccumulator();
-        const situacoes = store?.situacaoEnvioCounts || store?.formasEnvio || null;
-        if (!situacoes || typeof situacoes !== 'object') return out;
-        ['aguardando','emSeparacao','em_separacao','em_separao','separadas','embaladas','checkout'].forEach(statusKey => {
-          const counts = situacoes?.[statusKey];
-          if (counts && typeof counts === 'object') {
-            ehfSomarCanalCounts(out, ehfNormalizarCanalCountsObj(counts, storeKey));
-          }
-        });
-        return out;
-      }
-
-      function ehfSomarSituacaoCanalCounts(store, storeKey) {
-        const out = ehfNovoCanalAccumulator();
-        const situacoes = store?.situacaoCanalCounts || null;
-        if (!situacoes || typeof situacoes !== 'object') return out;
-        ['aguardando','emSeparacao','em_separacao','em_separao','separadas','embaladas','checkout'].forEach(statusKey => {
-          const counts = situacoes?.[statusKey];
-          if (counts && typeof counts === 'object') {
-            ehfSomarCanalCounts(out, ehfNormalizarCanalCountsObj(counts, storeKey));
-          }
-        });
-        return out;
-      }
-
-      function ehfCanalTotalIdentificado(counts) {
-        return Object.entries(counts || {}).reduce((acc, [key, value]) => key === 'NAO_IDENTIFICADO' ? acc : acc + Number(value || 0), 0);
-      }
-
-      function ehfBuildExecutiveChannelCounts(stores, data) {
-        const out = ehfNovoCanalAccumulator();
-
-        // v4.2.8: "Pacotes por canal" segue o Resumo Operacional por Loja.
-        // Não usar channelCountsExact nem MercadoLivrePainel aqui, porque esses dados vêm da leitura direta ML
-        // e podem incluir escopos diferentes da aba Envios de hoje. A base correta é situacaoEnvioCounts,
-        // preferencialmente por idFormaEnvio Tiny; se faltar, usar situacaoCanalCounts e, por último, canalCounts.
-        const origem = stores || data?.raw?.perStore || data?.perStore || data?.dbSnapshot?.perStore || {};
-        Object.entries(origem || {}).forEach(([rawStoreKey, store]) => {
-          const storeKey = normalizeStoreKey(rawStoreKey);
-          const porFormaEnvio = ehfSomarSituacaoEnvioCounts(store, storeKey);
-          if (ehfCanalTotalIdentificado(porFormaEnvio) > 0) {
-            ehfSomarCanalCounts(out, porFormaEnvio);
-            return;
-          }
-
-          const porNomeCanal = ehfSomarSituacaoCanalCounts(store, storeKey);
-          if (ehfCanalTotalIdentificado(porNomeCanal) > 0) {
-            ehfSomarCanalCounts(out, porNomeCanal);
-            return;
-          }
-
-          const counts = store?.strictCanalCounts || store?.canalCounts || {};
-          ehfSomarCanalCounts(out, ehfNormalizarCanalCountsObj(counts, storeKey));
-        });
-        return out;
-      }
-
       function atualizarPainelExecutivo(stores, data, produtividadeData) {
         try {
-          const totaisPainel = ehfTotaisDeTodasAsContas(stores || ehfStoresDoSnapshot(data));
-          const total = Number(totaisPainel.total || 0);
-          const aguardando = Number(totaisPainel.aguardando || 0);
-          const emSeparacao = Number(totaisPainel.emSeparacao || 0);
-          const separadas = Number(totaisPainel.separadas || 0);
-          const embaladas = Number(totaisPainel.embaladas || 0);
-          const operacional = Math.max(total, 1);
+          const total = Number(data?.total || 0);
+          const aguardando = Number(data?.aguardando || 0);
+          const emSeparacao = Number(data?.emSeparacao || 0);
+          const separadas = Number(data?.separadas || 0);
+          const embaladas = Number(data?.embaladas || 0);
+          const operacional = Math.max(aguardando + emSeparacao + separadas + embaladas, 1);
           const concluido = Math.min(100, Math.round((embaladas / operacional) * 100));
 
           setText('gauge-percent', `${concluido}%`);
@@ -5519,38 +5394,61 @@ document.addEventListener('DOMContentLoaded',()=>setTimeout(ehfApplyHashView,0))
           }
           if (riscoNote) riscoNote.textContent = riscoAlto ? 'Monitorando cutoffs' : 'Dentro do previsto';
 
-          const exactCounts = ehfBuildExecutiveChannelCounts(stores, data);
           const canalAcc = {
-            'Flex': Number(exactCounts.FLEX || 0),
-            'Agência/Coleta': Number(exactCounts.COLETA || 0),
-            'Shopee': Number(exactCounts.SHOPEE || 0),
-            'TikTok': Number(exactCounts.TIKTOK || 0),
-            'Amazon': Number(exactCounts.AMAZON || 0),
-            'Magalu': Number(exactCounts.MAGALU || 0),
-            'Outros': Number(exactCounts.TRANSPORTADORA || 0) + Number(exactCounts.CORREIOS || 0) + Number(exactCounts.RETIRADA || 0),
-            'Não identificado': Number(exactCounts.NAO_IDENTIFICADO || 0)
+            'Mercado Livre': 0,
+            'Shopee': 0,
+            'Amazon': 0,
+            'TikTok': 0,
+            'Magalu': 0,
+            'Outros': 0
           };
 
-          const canaisOrdenados = ['Flex', 'Agência/Coleta', 'Shopee', 'TikTok', 'Amazon', 'Magalu', 'Outros', 'Não identificado'];
+          const mapearCanalExecutivo = (nomeCanalBruto = '') => {
+            const nome = String(nomeCanalBruto || '')
+              .toLowerCase()
+              .normalize('NFD')
+              .replace(/[\u0300-\u036f]/g, '');
+
+            if (nome.includes('mercado')) return 'Mercado Livre';
+            if (nome.includes('shopee') || nome.includes('spx')) return 'Shopee';
+            if (nome.includes('amazon')) return 'Amazon';
+            if (nome.includes('tiktok')) return 'TikTok';
+            if (nome.includes('magalu')) return 'Magalu';
+            return 'Outros';
+          };
+
+          Object.keys(stores || {}).forEach(storeKey => {
+            const store = stores[storeKey] || {};
+            const situacao = normalizeSituacaoEnvioCounts(store.situacaoEnvioCounts || {});
+
+            Object.keys(situacao).forEach(statusKey => {
+              const canais = situacao[statusKey] || {};
+
+              Object.keys(canais).forEach(canalIdOuNome => {
+                const qtd = Number(canais[canalIdOuNome] || 0);
+                if (!Number.isFinite(qtd) || qtd <= 0) return;
+
+                const canalTraduzido = translateChannelName(canalIdOuNome, storeKey);
+                const grupoCanal = mapearCanalExecutivo(canalTraduzido);
+                canalAcc[grupoCanal] = (canalAcc[grupoCanal] || 0) + qtd;
+              });
+            });
+          });
+
+          const canaisOrdenados = ['Mercado Livre', 'Shopee', 'Amazon', 'TikTok', 'Magalu', 'Outros'];
           const maxCanal = Math.max(...canaisOrdenados.map(nome => Number(canalAcc[nome] || 0)), 1);
           const list = document.getElementById('executive-bar-list');
           if (list) {
             list.innerHTML = canaisOrdenados.map(nome => {
               const qtd = Number(canalAcc[nome] || 0);
               const pct = qtd > 0 ? Math.max(4, Math.round((qtd / maxCanal) * 100)) : 0;
-              const fonte = nome === 'Flex' || nome === 'Agência/Coleta'
-                ? 'Resumo por loja / idFormaEnvio Tiny'
-                : (nome === 'Não identificado' ? 'Sem identificador' : 'Resumo por loja / idFormaEnvio Tiny');
-              return `<div class="bar-row" title="${fonte}; sem rateio"><span>${nome}</span><div class="bar-track"><i style="width:${pct}%"></i></div><b>${qtd}</b></div>`;
+              return `<div class="bar-row"><span>${nome}</span><div class="bar-track"><i style="width:${pct}%"></i></div><b>${qtd}</b></div>`;
             }).join('');
           }
 
-          const totalCanais = canaisOrdenados.filter(nome => nome !== 'Não identificado').reduce((acc, nome) => acc + Number(canalAcc[nome] || 0), 0);
+          const totalCanais = canaisOrdenados.reduce((acc, nome) => acc + Number(canalAcc[nome] || 0), 0);
           const chartTotal = document.getElementById('chart-total-label');
-          if (chartTotal) {
-            chartTotal.textContent = `Total identificado: ${totalCanais}`;
-            chartTotal.title = 'Canais calculados pelo Resumo Operacional por Loja usando idFormaEnvio Tiny; Mercado Livre direto não alimenta este gráfico.';
-          }
+          if (chartTotal) chartTotal.textContent = `Total: ${totalCanais}`;
 
           const enterpriseAlert = document.getElementById('enterprise-alert-count');
           if (enterpriseAlert) enterpriseAlert.textContent = riscoAlto ? '1' : '0';
@@ -5603,6 +5501,79 @@ document.addEventListener('DOMContentLoaded',()=>setTimeout(ehfApplyHashView,0))
         }
       }
 
+      function apiWriteHeaders() {
+        const headers = {
+          'Accept': 'application/json',
+          'Content-Type': 'application/json'
+        };
+        const apiKey = localStorage.getItem('ehf_api_key') || '';
+        if (apiKey) headers['x-api-key'] = apiKey;
+        return headers;
+      }
+
+      async function iniciarEEsperarSyncTiny() {
+        setSyncHealth('processing', 'Sincronizando Tiny...', 'Aguardando a conclusão da leitura das quatro contas.');
+
+        const before = await fetchApiJson('/api/sync/status');
+        const beforeId = Number(before?.tiny?.id || 0);
+        const wasRunning = Boolean(before?.running?.tinyRealtime);
+
+        const startResponse = await fetch(`${API_BASE}/api/sync/tiny?_ts=${Date.now()}`, {
+          method: 'POST',
+          cache: 'no-store',
+          headers: apiWriteHeaders(),
+          body: '{}'
+        });
+
+        const startRaw = await startResponse.text();
+        let startData = {};
+        try {
+          startData = startRaw ? JSON.parse(startRaw) : {};
+        } catch (_) {
+          throw new Error('A rota de sincronização do Tiny devolveu uma resposta inválida.');
+        }
+
+        if (!startResponse.ok && startResponse.status !== 409) {
+          const message = startData?.error === 'API_KEY_INVALIDA'
+            ? 'A API Key do painel não confere com a configurada no Easypanel.'
+            : (startData?.error || startData?.message || `Erro HTTP ${startResponse.status} ao iniciar o Tiny.`);
+          throw new Error(message);
+        }
+
+        let targetId = Number(startData?.current?.id || 0);
+        if (!targetId && (startData?.alreadyRunning || startResponse.status === 409) && wasRunning) {
+          targetId = beforeId;
+        }
+        const deadline = Date.now() + 240000;
+
+        while (Date.now() < deadline) {
+          await new Promise(resolve => setTimeout(resolve, 1250));
+          const status = await fetchApiJson('/api/sync/status');
+          const row = status?.tiny || null;
+          const rowId = Number(row?.id || 0);
+
+          if (rowId > beforeId) targetId = rowId;
+          if (!targetId && (startData?.alreadyRunning || startResponse.status === 409) && rowId === beforeId) targetId = rowId;
+
+          const finished =
+            targetId > 0 &&
+            rowId === targetId &&
+            row?.status &&
+            row.status !== 'RUNNING' &&
+            Boolean(row.finished_at);
+
+          if (!finished) continue;
+
+          if (row.status === 'ERROR') {
+            throw new Error(row.error || 'A sincronização do Tiny terminou com erro.');
+          }
+
+          return row;
+        }
+
+        throw new Error('O Tiny não confirmou a conclusão da sincronização dentro de 4 minutos.');
+      }
+
       async function syncOnceComRelogio(origem = 'auto') {
         if (sincronizacaoEmAndamento) return;
 
@@ -5611,32 +5582,23 @@ document.addEventListener('DOMContentLoaded',()=>setTimeout(ehfApplyHashView,0))
         atualizarRelogioAutoSync();
 
         try {
-          if (origem === 'manual') {
-            try {
-              const response = await fetch(API_BASE + '/api/sync/tiny/operational', {
-                method: 'POST',
-                headers: { Accept: 'application/json' }
-              });
-              const started = await response.json().catch(() => ({}));
-              if (!response.ok || started.ok === false) {
-                throw new Error(started.error || `HTTP ${response.status}`);
-              }
+          let manualRun = null;
 
-              const limite = Date.now() + 5 * 60 * 1000;
-              while (Date.now() < limite) {
-                await new Promise(resolve => setTimeout(resolve, 1500));
-                const statusResponse = await fetch(API_BASE + '/api/sync/status?ts=' + Date.now(), { cache: 'no-store' });
-                const status = await statusResponse.json().catch(() => ({}));
-                aplicarResumoTempoReal(await buscarResumo());
-                if (!status?.running?.operational && !status?.running?.tinyRealtime && !status?.running?.products) {
-                  break;
-                }
-              }
-            } catch (e) {
-              console.warn('Falha na sincronização Tiny operacional exata:', e);
-            }
+          if (origem === 'manual') {
+            manualRun = await iniciarEEsperarSyncTiny();
           }
-          await syncOnce();
+
+          const data = await syncOnce();
+
+          if (manualRun?.status === 'PARTIAL') {
+            setSyncHealth(
+              'warn',
+              'Sincronização parcial',
+              manualRun.error || manualRun?.summary?.warning || 'Uma ou mais contas não concluíram a paginação; o último snapshot completo foi preservado.'
+            );
+          } else if (data?.ts) {
+            updateSyncFreshness(data.ts, origem === 'manual' ? 'Sincronização concluída' : 'Sincronização online');
+          }
 
           if (typeof atualizarResumoEsperadoBipagem === 'function') {
             try {
@@ -5646,6 +5608,11 @@ document.addEventListener('DOMContentLoaded',()=>setTimeout(ehfApplyHashView,0))
             }
           }
 
+          return data;
+        } catch (error) {
+          console.error('Falha ao atualizar a contagem operacional do Tiny:', error);
+          setSyncHealth('error', 'Falha na sincronização', error?.message || String(error));
+          throw error;
         } finally {
           proximaAtualizacaoMs = Date.now() + SYNC_INTERVAL_MS;
           sincronizacaoEmAndamento = false;
@@ -5653,6 +5620,7 @@ document.addEventListener('DOMContentLoaded',()=>setTimeout(ehfApplyHashView,0))
           atualizarRelogioAutoSync();
         }
       }
+
 
       window.syncOnceTiny = syncOnceComRelogio;
 
@@ -5662,7 +5630,7 @@ document.addEventListener('DOMContentLoaded',()=>setTimeout(ehfApplyHashView,0))
         const inputOperadores = document.getElementById('input-operators');
 
         if (btn) {
-          btn.addEventListener('click', () => syncOnceComRelogio('manual'));
+          btn.addEventListener('click', () => syncOnceComRelogio('manual').catch(() => {}));
         }
 
         if (inputTempo) {
@@ -5680,11 +5648,11 @@ document.addEventListener('DOMContentLoaded',()=>setTimeout(ehfApplyHashView,0))
           window.corrigirTextoSuprimentos();
         }
         atualizarProducaoRealUltimaHora();
-        syncOnceComRelogio('inicial');
+        syncOnceComRelogio('inicial').catch(() => {});
         iniciarCanalResumoTempoReal();
-        setTimeout(sincronizarResumoTempoReal, 8000);
+        setTimeout(sincronizarResumoTempoReal, 1200);
 
-        setInterval(() => syncOnceComRelogio('auto'), SYNC_INTERVAL_MS);
+        setInterval(() => syncOnceComRelogio('auto').catch(() => {}), SYNC_INTERVAL_MS);
         // O motor de alarme é iniciado no script principal do Firebase,
         // onde localTasks e verificarAlarmesDePrazo existem no mesmo escopo.
         if (window.verificarAlarmesDePrazo) {
@@ -5721,32 +5689,7 @@ document.addEventListener('DOMContentLoaded',()=>setTimeout(ehfApplyHashView,0))
     }
   </script>
 
-  <script src="modules/mobile-site-nav.js?v=4247" defer></script>
-  <script src="modules/mobile-camera-scan.js?v=4247" defer></script>
-  <script src="modules/mobile-romaneio-pc.js?v=4247" defer></script>
-  <script src="modules/mobile-clean-bipagem.js?v=4247" defer></script>
-  
-<script>
-(function(){
-  window.EHF_CAMERA_LOADER_VERSION='4.2.31-DASHMARKETPLACE-GHPAGES';
-  function loadCameraScript(){
-    if(window.EHF_MOBILE_CAMERA_SCAN_VERSION || document.querySelector('script[src*="mobile-camera-scan.js"]')) return;
-    var s=document.createElement('script');
-    s.src='modules/mobile-camera-scan.js?v=4247';
-    s.defer=true;
-    s.onload=function(){ console.log('[EHF] mobile-camera-scan carregado', window.EHF_MOBILE_CAMERA_SCAN_VERSION); };
-    s.onerror=function(){ console.error('[EHF] Falha ao carregar modules/mobile-camera-scan.js?v=4247'); };
-    document.head.appendChild(s);
-  }
-  loadCameraScript();
-  document.addEventListener('DOMContentLoaded', loadCameraScript);
-  setTimeout(loadCameraScript, 800);
-})();
-</script>
-
-  <script type="module" src="modules/painel-runtime.js?v=4247"></script>
-  <script src="modules/painel-guard.js?v=4247" defer></script>
-  <script src="modules/bipagem-resumo-operacional.js?v=4247" defer></script>
+  <script type="module" src="modules/painel-runtime.js?v=3411"></script>
 
 
   <script>
@@ -5955,7 +5898,7 @@ document.addEventListener('DOMContentLoaded',()=>setTimeout(ehfApplyHashView,0))
           txt(`row-${key}-aguardando`,store.aguardando||0);txt(`row-${key}-separacao`,store.emSeparacao||0);txt(`row-${key}-separadas`,store.separadas||0);txt(`row-${key}-embaladas`,store.embaladas||0);txt(`row-${key}-total`,store.total||0);renderDetails(key,store);
         });
         if(typeof recalcularETALocal==='function')recalcularETALocal();
-        txt('last-sync',new Date().toLocaleTimeString('pt-BR',{timeZone:'America/Sao_Paulo'}));
+        // O filtro por marcador não altera o horário da última sincronização do servidor.
         if(typeof atualizarPainelExecutivo==='function'){try{atualizarPainelExecutivo(stores,data,null);}catch(e){}}
         renderPedidosMarcador(data.pedidos||[]);
         delaySummary.style.display='none';
@@ -6059,8 +6002,8 @@ document.addEventListener('DOMContentLoaded',()=>setTimeout(ehfApplyHashView,0))
 <script id="ehf-v31-runtime-fix">
 (function(){
   function clearLegacyFloaters(){
+    document.getElementById('painel-producao-flutuante')?.remove();
     document.getElementById('bip-resumo-rapido-flutuante')?.remove();
-    setTimeout(()=>window.ehfAtualizarVisibilidadePainelProducao?.(),0);
   }
   function ensureBipSetup(){
     clearLegacyFloaters();

@@ -1,0 +1,14 @@
+VESCO SEPARAÇÃO V3.4.3 — CORREÇÃO DE SINCRONIZAÇÃO
+
+Principais ajustes:
+- Tiny, produtos, Mercado Livre e etiquetas não bloqueiam mais uns aos outros.
+- Os botões aguardam a execução real do backend e validam sucesso, falha parcial ou erro.
+- O painel mostra o horário confirmado pelo servidor e avisa quando o snapshot está antigo.
+- Requisições operacionais usam no-store e cache-busting.
+- /api/health e /api/sync/status informam execução, última atualização e idade dos dados.
+
+Ordem de publicação:
+1. Easypanel.
+2. Confirmar em /api/health a versão 3.4.3-SYNC-STATUS-CACHE-FIX.
+3. Painel na raiz do Vercel/GitHub Pages.
+4. Ctrl+F5.

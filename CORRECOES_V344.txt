@@ -1,0 +1,11 @@
+VESCO SEPARAÇÃO V3.4.4 — READY STATE E SYNC IDEMPOTENTE
+
+Correções:
+- ausência de dados não aparece mais como zero real;
+- última sincronização usa somente snapshot completo;
+- diagnóstico detalhado por conta em /api/diagnostico/sync;
+- primeiro Tiny tem prioridade no boot;
+- HTTP 409 de sincronização já ativa foi eliminado;
+- Mercado Livre incompleto registra PARTIAL;
+- validação das quatro contas do Tiny e Mercado Livre;
+- alerta de persistência do banco em /app/data.

@@ -1,0 +1,4 @@
+VESCO SEPARAÇÃO V3.4.3 — SYNC FIX
+O index.html correto começa com <!doctype html>.
+Publique SOMENTE o conteúdo desta pasta na raiz do GitHub Pages/Vercel.
+Depois do deploy, faça Ctrl+F5.
