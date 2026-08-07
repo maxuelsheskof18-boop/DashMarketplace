@@ -1,5 +1,5 @@
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-    import { getDatabase, ref, set, onValue, push } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
+    import { getDatabase, ref, set, onValue, push, remove } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
 
     const firebaseConfig = {
       apiKey: "AIzaSyCcO-kwO-vIFs8x0zchjlyc1bsOxCLnhgs",
@@ -477,6 +477,96 @@
     /* ========== SESSÃO DE COLETA / ROMANEIO ========== */
     const EHF_WORKER_BASE = String(window.EHF_API_BASE || 'https://atendente-vesco-separacao.2cwhzy.easypanel.host').replace(/\/+$/, '');
     let ehfBipSession = null;
+    const EHF_FAST_BIP_QUEUE_KEY = `ehf_fast_bip_queue_${DATA_OPERACIONAL}`;
+    const ehfFastBipSeen = new Set();
+    let ehfFastBipQueue = [];
+    let ehfFastBipInFlight = 0;
+    let ehfFastBipPollBusy = false;
+    let ehfFastLastServerQueue = { resolver: { pending: 0 }, sheet: { pending: 0 } };
+
+    function ehfFastLoadPendingQueue() {
+      try {
+        const rows = JSON.parse(localStorage.getItem(EHF_FAST_BIP_QUEUE_KEY) || '[]');
+        ehfFastBipQueue = Array.isArray(rows) ? rows.filter((row) => row && row.code && row.sessionId) : [];
+        ehfFastBipQueue.forEach((row) => ehfFastBipSeen.add(String(row.normalized || limparCodigoBipado(row.code))));
+      } catch (_) { ehfFastBipQueue = []; }
+    }
+
+    function ehfFastPersistQueue() {
+      try { localStorage.setItem(EHF_FAST_BIP_QUEUE_KEY, JSON.stringify(ehfFastBipQueue.slice(-500))); } catch (_) {}
+      ehfFastUpdateQueueUi();
+    }
+
+    function ehfFastUpdateQueueUi(summary) {
+      const local = ehfFastBipQueue.length + ehfFastBipInFlight;
+      const pending = Number(summary?.pendingResolution ?? ehfBipSession?.summary?.pendingResolution ?? ehfFastLastServerQueue?.resolver?.pending ?? 0);
+      const sheet = Number(summary?.sheetPending ?? ehfBipSession?.summary?.sheetPending ?? ehfFastLastServerQueue?.sheet?.pending ?? 0);
+      const q = document.getElementById('bip-session-queue'); if (q) q.textContent = String(local);
+      const p = document.getElementById('bip-session-pending'); if (p) p.textContent = String(pending);
+      const sh = document.getElementById('bip-session-sheet'); if (sh) sh.textContent = String(sheet);
+      const status = document.querySelector('.bip-scan-hero .scan-status');
+      if (status) {
+        status.textContent = local > 0 ? `Salvando ${local}` : pending > 0 ? `Identificando ${pending}` : 'Pronto';
+        status.classList.toggle('busy', local > 0 || pending > 0);
+      }
+    }
+
+    function ehfFastStatusFromScan(scan) {
+      const resolution = String(scan?.resolution_status || '').toUpperCase();
+      if (resolution === 'RESOLVIDO') return scan.status === 'CANAL_DIVERGENTE' ? 'Canal divergente' : 'Conferido';
+      if (resolution === 'NAO_LOCALIZADO' || resolution === 'ERRO_FINAL') return 'Não localizado';
+      return 'Identificando...';
+    }
+
+    function ehfFastRefreshSeenFromSession(detail) {
+      (detail?.scans || []).forEach((scan) => {
+        const code = String(scan.normalized_code || scan.scanned_code || '').trim();
+        if (code) ehfFastBipSeen.add(code);
+      });
+    }
+
+    function ehfFastSyncFirebaseFromSession(detail) {
+      const scans = detail?.scans || [];
+      if (!scans.length || !(ehfBipagensCache || []).length) return;
+      const byId = new Map(scans.map((scan) => [String(scan.id || ''), scan]));
+      const byCode = new Map(scans.map((scan) => [String(scan.normalized_code || scan.scanned_code || '').trim(), scan]));
+      (ehfBipagensCache || []).forEach((cached) => {
+        const code = String(cached.codigoLimpo || cached.codigo || '').trim();
+        const scan = (cached.scanId ? byId.get(String(cached.scanId)) : null) || byCode.get(code);
+        if (!scan || !cached._firebaseKey) return;
+        const nextStatus = ehfFastStatusFromScan(scan);
+        const nextTiny = String(scan.tiny_number || '');
+        const nextMarket = String(scan.ecommerce_order_id || '');
+        const nextStore = String(scan.account || cached.lojaKey || 'nao_localizada');
+        const nextUnits = Number(scan.total_units || 0);
+        const nextResolution = String(scan.resolution_status || '');
+        const unchanged = String(cached.status || '') === nextStatus &&
+          String(cached.pedidoTiny || '') === nextTiny && String(cached.pedidoMarketplace || '') === nextMarket &&
+          Number(cached.totalUnidades || 0) === nextUnits && String(cached.lookupStatus || '') === nextResolution &&
+          String(cached.scanId || '') === String(scan.id || '');
+        if (unchanged) return;
+        const payload = { ...cached };
+        delete payload._firebaseKey;
+        Object.assign(payload, {
+          scanId: scan.id,
+          lojaKey: nextStore,
+          lojaNome: NOMES_LOJAS_BIPAGEM[nextStore] || nextStore || 'Não localizada',
+          plataforma: scan.platform || cached.plataforma || 'A identificar',
+          canal: scan.channel_code || cached.canal || '',
+          canalNome: scan.channel_name || cached.canalNome || '',
+          idEtiqueta: scan.normalized_code || cached.idEtiqueta || code,
+          codigoRastreio: scan.shipment_id || cached.codigoRastreio || code,
+          pedidoTiny: nextTiny,
+          pedidoMarketplace: nextMarket,
+          totalUnidades: nextUnits,
+          lookupStatus: nextResolution,
+          lookupTentativas: Number(scan.resolution_attempts || 0),
+          status: nextStatus,
+          observacao: scan.error || (nextStatus === 'Conferido' ? 'Pedido identificado em segundo plano.' : cached.observacao || '')
+        });
+        set(ref(db, `${diaPath('bipagens_dia')}/${cached._firebaseKey}`), payload).catch(()=>{});
+      });
+    }
 
     function ehfApiHeaders() {
       const headers = { 'Content-Type': 'application/json' };
@@ -547,6 +637,9 @@
       const btnFinish = document.getElementById('btn-bip-session-finish');
       document.getElementById('bip-session-packages').textContent = Number(summary.packages || 0);
       document.getElementById('bip-session-units').textContent = Number(summary.totalUnits || 0);
+      ehfFastRefreshSeenFromSession(detail);
+      ehfFastSyncFirebaseFromSession(detail);
+      ehfFastUpdateQueueUi(summary);
       const meta = document.getElementById('bip-session-current-meta');
       window.ehfBipHasOpenSession = !!(session && session.status === 'ABERTA');
       if (!session || session.status !== 'ABERTA') {
@@ -618,17 +711,19 @@
     function ehfPrintManifest(detail) {
       if (!detail?.session) return;
       const { session, scans = [], summary = {} } = detail;
-      const rows = scans.filter((scan) => scan.status !== 'NAO_LOCALIZADO').map((scan, index) => {
+      const rows = scans.map((scan, index) => {
         const products = (scan.items || []).map((item) => `${Number(item.quantity || item.quantidade || 0)}x ${item.description || item.descricao || item.sku || item.codigo || ''}`).join('<br>');
-        return `<tr><td>${index + 1}</td><td>${ehfEscapeHtml((scan.account || '').toUpperCase())}</td><td>${ehfEscapeHtml(scan.tiny_number || '-')}</td><td>${ehfEscapeHtml(scan.ecommerce_order_id || '-')}</td><td>${ehfEscapeHtml(scan.normalized_code || scan.shipment_id || '-')}</td><td>${products || '-'}</td><td>${Number(scan.total_units || 0)}</td></tr>`;
+        const status = ehfFastStatusFromScan(scan);
+        return `<tr><td>${index + 1}</td><td><b>#${Number(scan.id || 0)}</b></td><td>${ehfEscapeHtml((scan.account || session.account || '-').toUpperCase())}</td><td>${ehfEscapeHtml(scan.tiny_number || '-')}</td><td>${ehfEscapeHtml(scan.ecommerce_order_id || '-')}</td><td>${ehfEscapeHtml(scan.normalized_code || scan.shipment_id || scan.scanned_code || '-')}</td><td>${ehfEscapeHtml(scan.capture_category || '-')}</td><td>${ehfEscapeHtml(status)}</td><td>${products || '-'}</td><td>${Number(scan.total_units || 0)}</td></tr>`;
       }).join('');
-      const win = window.open('', '_blank', 'width=1100,height=800');
+      const firstId = summary.firstScanId || (scans[0]?.id || '-');
+      const lastId = summary.lastScanId || (scans.length ? scans[scans.length - 1]?.id : '-');
+      const idRange = scans.length ? (String(firstId) === String(lastId) ? `#${firstId}` : `#${firstId} a #${lastId}`) : '-';
+      const win = window.open('', '_blank', 'width=1180,height=820');
       if (!win) return ehfBipToast('O navegador bloqueou a abertura do romaneio.', true);
-      win.document.write(`<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>Romaneio #${session.id}</title><style>body{font-family:Arial,sans-serif;color:#111;margin:26px}h1{margin:0;font-size:24px}.head{display:flex;justify-content:space-between;border-bottom:3px solid #111;padding-bottom:12px}.meta{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:16px 0}.meta div{border:1px solid #bbb;padding:9px}.meta span{display:block;font-size:10px;text-transform:uppercase;color:#555}.meta b{font-size:13px}table{width:100%;border-collapse:collapse;font-size:11px}th,td{border:1px solid #aaa;padding:7px;vertical-align:top}th{background:#eee}.totals{display:flex;gap:12px;margin:15px 0}.totals div{border:2px solid #111;padding:10px 16px}.signatures{display:grid;grid-template-columns:1fr 1fr;gap:50px;margin-top:70px}.signature{border-top:1px solid #111;text-align:center;padding-top:6px}.foot{margin-top:24px;font-size:9px;color:#555}@media print{button{display:none}body{margin:12mm}}</style></head><body><div class="head"><div><h1>EHF LOGÍSTICA</h1><div>Romaneio de coleta / expedição</div></div><div><b>ROMANEIO #${session.id}</b><br>${new Date().toLocaleString('pt-BR')}</div></div><div class="meta"><div><span>Canal</span><b>${ehfEscapeHtml(session.channel_name)}</b></div><div><span>Responsável / coletor</span><b>${ehfEscapeHtml(session.collector_name)}</b></div><div><span>Conferente</span><b>${ehfEscapeHtml(session.checker_name || session.operator)}</b></div><div><span>Início</span><b>${new Date(session.opened_at).toLocaleString('pt-BR')}</b></div><div><span>Fim</span><b>${session.closed_at ? new Date(session.closed_at).toLocaleString('pt-BR') : 'Em andamento'}</b></div><div><span>Observações</span><b>${ehfEscapeHtml(session.notes || '-')}</b></div></div><table><thead><tr><th>#</th><th>Loja</th><th>Pedido Tiny</th><th>Pedido marketplace</th><th>Etiqueta / envio</th><th>Produtos</th><th>Unidades</th></tr></thead><tbody>${rows || '<tr><td colspan="7">Nenhum pacote localizado.</td></tr>'}</tbody></table><div class="totals"><div><b>${Number(summary.packages || 0)}</b><br>pacotes</div><div><b>${Number(summary.uniqueOrders || 0)}</b><br>pedidos</div><div><b>${Number(summary.totalUnits || 0)}</b><br>unidades</div><div><b>${Number(summary.notFound || 0)}</b><br>não localizados</div></div><div class="signatures"><div class="signature">Entregue/conferido por: ${ehfEscapeHtml(session.checker_name || session.operator)}</div><div class="signature">Recebido por: ${ehfEscapeHtml(session.collector_name)}</div></div><div class="signatures"><div class="signature">Documento / placa</div><div class="signature">Assinatura e data/hora</div></div><div class="foot">Gerado pelo Dashboard de Separação EHF · sessão ${session.id}</div></body></html>`);
+      win.document.write(`<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>Romaneio #${session.id}</title><style>body{font-family:Arial,sans-serif;color:#111;margin:26px}h1{margin:0;font-size:24px}.head{display:flex;justify-content:space-between;border-bottom:3px solid #111;padding-bottom:12px}.meta{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:16px 0}.meta div{border:1px solid #bbb;padding:9px}.meta span{display:block;font-size:10px;text-transform:uppercase;color:#555}.meta b{font-size:13px}table{width:100%;border-collapse:collapse;font-size:10px}th,td{border:1px solid #aaa;padding:6px;vertical-align:top}th{background:#eee}.totals{display:grid;grid-template-columns:repeat(6,1fr);gap:8px;margin:15px 0}.totals div{border:2px solid #111;padding:9px;text-align:center}.totals b{font-size:21px}.receipt{margin:22px 0 0;border:2px solid #111;padding:12px;font-size:12px;line-height:1.5}.signatures{display:grid;grid-template-columns:1fr 1fr;gap:50px;margin-top:70px}.signature{border-top:1px solid #111;text-align:center;padding-top:6px}.foot{margin-top:24px;font-size:9px;color:#555}@media print{button{display:none}body{margin:9mm}}@page{size:A4 landscape;margin:8mm}</style></head><body><div class="head"><div><h1>EHF LOGÍSTICA</h1><div>Romaneio de coleta / expedição</div></div><div><b>ROMANEIO #${session.id}</b><br>${new Date().toLocaleString('pt-BR')}</div></div><div class="meta"><div><span>Canal</span><b>${ehfEscapeHtml(session.channel_name)}</b></div><div><span>Responsável / coletor</span><b>${ehfEscapeHtml(session.collector_name)}</b></div><div><span>Conferente</span><b>${ehfEscapeHtml(session.checker_name || session.operator)}</b></div><div><span>Início</span><b>${new Date(session.opened_at).toLocaleString('pt-BR')}</b></div><div><span>Fim</span><b>${session.closed_at ? new Date(session.closed_at).toLocaleString('pt-BR') : 'Em andamento'}</b></div><div><span>IDs internos de bipagem</span><b>${ehfEscapeHtml(idRange)}</b></div></div><div class="totals"><div><b>${Number(summary.packages || scans.length || 0)}</b><br>volumes bipados</div><div><b>${Number(summary.resolvedPackages || 0)}</b><br>identificados</div><div><b>${Number(summary.pendingResolution || 0)}</b><br>em identificação</div><div><b>${Number(summary.uniqueOrders || 0)}</b><br>pedidos</div><div><b>${Number(summary.totalUnits || 0)}</b><br>unidades</div><div><b>${Number(summary.channelDivergence || 0)}</b><br>divergências</div></div><table><thead><tr><th>#</th><th>ID bipagem</th><th>Loja</th><th>Pedido Tiny</th><th>Pedido marketplace</th><th>Código / rastreio</th><th>Categoria</th><th>Status</th><th>Produtos</th><th>Unid.</th></tr></thead><tbody>${rows || '<tr><td colspan="10">Nenhuma leitura registrada.</td></tr>'}</tbody></table><div class="receipt">Declaro o recebimento de <b>${Number(summary.packages || scans.length || 0)} volume(s)</b> referentes ao <b>Romaneio #${session.id}</b>, identificados internamente pela faixa <b>${ehfEscapeHtml(idRange)}</b>. Pedidos ainda em identificação poderão ser vinculados automaticamente em segundo plano sem alterar a quantidade física recebida.</div><div class="signatures"><div class="signature">Entregue/conferido por: ${ehfEscapeHtml(session.checker_name || session.operator)}</div><div class="signature">Recebido por: ${ehfEscapeHtml(session.collector_name)}</div></div><div class="signatures"><div class="signature">Documento / placa</div><div class="signature">Assinatura e data/hora</div></div><div class="foot">Dashboard EHF · Romaneio #${session.id} · ${Number(summary.packages || scans.length || 0)} volumes · IDs ${ehfEscapeHtml(idRange)}</div></body></html>`);
       win.document.close();
-      setTimeout(() => {
-        try { win.focus(); win.print(); } catch (_) {}
-      }, 350);
+      setTimeout(() => { try { win.focus(); win.print(); } catch (_) {} }, 350);
     }
 
     async function ehfRefreshBipSession() {
@@ -666,7 +761,14 @@
     document.getElementById('btn-bip-session-manifest')?.addEventListener('click', () => ehfPrintManifest(ehfBipSession));
     document.getElementById('btn-bip-session-finish')?.addEventListener('click', ehfFinishBipSession);
     document.getElementById('bip-session-modal')?.addEventListener('click', (event) => { if (event.target.id === 'bip-session-modal') ehfCloseBipSessionModal(); });
+    ehfFastLoadPendingQueue();
     ehfLoadBipSession();
+    setInterval(async () => {
+      if (ehfFastBipPollBusy || !ehfBipSession?.session?.id || ehfBipSession.session.status !== 'ABERTA') return;
+      ehfFastBipPollBusy = true;
+      try { await ehfRefreshBipSession(); } finally { ehfFastBipPollBusy = false; }
+    }, 1600);
+    setInterval(ehfFastDrainQueue, 700);
 
     /* ========== BIPAGEM INTELIGENTE POR PLATAFORMA + LOJA ========== */
 
@@ -941,84 +1043,157 @@
       return melhor;
     }
 
-    async function processarBipagem(codigoDigitado) {
+    function ehfFastFirebaseRef(firebaseKey) {
+      return firebaseKey ? ref(db, `${diaPath('bipagens_dia')}/${firebaseKey}`) : null;
+    }
+
+    function ehfFastOptimisticPayload(code, normalized, info, firebaseKey) {
+      const session = ehfBipSession?.session || {};
+      const lojaKey = session.account || 'nao_localizada';
+      return {
+        codigo: code,
+        codigoLimpo: normalized,
+        plataforma: info.plataforma === 'Desconhecida' ? 'A identificar' : info.plataforma,
+        canal: info.canal || '',
+        canalNome: info.canalNome === 'Desconhecido' ? session.channel_name || 'A identificar' : info.canalNome,
+        canalEsperado: session.channel_name || '',
+        lojaKey,
+        lojaNome: NOMES_LOJAS_BIPAGEM[lojaKey] || 'A localizar',
+        idEtiqueta: info.idEtiqueta || normalized,
+        codigoRastreio: info.codigoRastreio || normalized,
+        tipo: info.tipo || 'captura_rapida',
+        categoriaCodigo: info.tipo || 'captura_rapida',
+        observacao: 'Leitura salva. Pedido sendo identificado em segundo plano.',
+        lookupStatus: 'PENDENTE',
+        status: 'Identificando...',
+        operador: nomeOperadorLocal,
+        coletor: session.collector_name || '',
+        sessaoBipagemId: session.id,
+        pedidoTiny: '',
+        pedidoMarketplace: '',
+        totalUnidades: 0,
+        horario: formatHorarioBrasilia(new Date(), true),
+        horarioCompleto: formatHorarioBrasilia(new Date(), true),
+        ts: Date.now(),
+        firebaseKey
+      };
+    }
+
+    function ehfFastScheduleRetry(item, error) {
+      item.attempts = Number(item.attempts || 0) + 1;
+      item.lastError = String(error?.message || error || 'Falha de rede');
+      const wait = Math.min(15000, 500 * Math.pow(1.7, Math.min(item.attempts, 8)));
+      item.nextAt = Date.now() + wait;
+      ehfFastBipQueue.push(item);
+      ehfFastPersistQueue();
+      setTimeout(ehfFastDrainQueue, wait + 20);
+    }
+
+    async function ehfFastSendCapture(item) {
+      try {
+        const data = await ehfApi(`/api/bipagem/sessoes/${item.sessionId}/capturar`, {
+          method: 'POST',
+          body: JSON.stringify({ codigo: item.code, operator: item.operator, capturedAt: item.capturedAt })
+        });
+        ehfFastLastServerQueue = data.queue || ehfFastLastServerQueue;
+        const firebaseRef = ehfFastFirebaseRef(item.firebaseKey);
+        if (data.duplicate) {
+          if (firebaseRef) remove(firebaseRef).catch(()=>{});
+          tocarSomConfirmacaoLeitura(false);
+          ehfBipToast(`Duplicado: ${item.normalized} já foi bipado hoje.`, true);
+          return;
+        }
+        if (firebaseRef && data.scan) {
+          const current = ehfBipagensCache.find((row) => row._firebaseKey === item.firebaseKey) || item.optimistic || {};
+          const payload = { ...current };
+          delete payload._firebaseKey;
+          Object.assign(payload, {
+            scanId: data.scan.id,
+            categoriaCodigo: data.scan.capture_category || data.category || payload.categoriaCodigo || '',
+            lookupStatus: data.scan.resolution_status || 'PENDENTE',
+            status: 'Identificando...',
+            observacao: 'Leitura confirmada pelo servidor. Pedido sendo identificado em segundo plano.'
+          });
+          set(firebaseRef, payload).catch(()=>{});
+        }
+        const pkg = document.getElementById('bip-session-packages'); if (pkg && data.summary) pkg.textContent = Number(data.summary.packages || 0);
+        ehfFastUpdateQueueUi(data.summary);
+      } catch (error) {
+        if ([400,404,409].includes(Number(error?.status || 0))) {
+          const firebaseRef = ehfFastFirebaseRef(item.firebaseKey);
+          if (firebaseRef) {
+            const payload = { ...(item.optimistic || {}), status: 'Erro de sessão', lookupStatus: 'ERRO', observacao: error.message || 'Não foi possível salvar a leitura.' };
+            set(firebaseRef, payload).catch(()=>{});
+          }
+          tocarSomConfirmacaoLeitura(false);
+          ehfBipToast(error.message || 'Não foi possível salvar a leitura.', true);
+          return;
+        }
+        ehfFastScheduleRetry(item, error);
+      }
+    }
+
+    function ehfFastDrainQueue() {
+      const MAX_IN_FLIGHT = 4;
+      if (!ehfFastBipQueue.length) return ehfFastUpdateQueueUi();
+      const now = Date.now();
+      while (ehfFastBipInFlight < MAX_IN_FLIGHT) {
+        const index = ehfFastBipQueue.findIndex((item) => Number(item.nextAt || 0) <= now);
+        if (index < 0) break;
+        const item = ehfFastBipQueue.splice(index, 1)[0];
+        ehfFastBipInFlight += 1;
+        ehfFastPersistQueue();
+        ehfFastSendCapture(item).finally(() => {
+          ehfFastBipInFlight = Math.max(0, ehfFastBipInFlight - 1);
+          ehfFastPersistQueue();
+          ehfFastDrainQueue();
+        });
+      }
+    }
+
+    function processarBipagem(codigoDigitado) {
       if (!ehfBipSession?.session?.id || ehfBipSession.session.status !== 'ABERTA') {
         ehfOpenBipSessionModal();
+        tocarSomConfirmacaoLeitura(false);
         ehfBipToast('Inicie uma conferência antes de bipar.', true);
         return;
       }
       const input = document.getElementById('input-leitor-codigo');
-      if (input) input.disabled = true;
-      try {
-        const data = await ehfApi(`/api/bipagem/sessoes/${ehfBipSession.session.id}/scan`, {
-          method: 'POST',
-          body: JSON.stringify({ codigo: codigoDigitado, operator: nomeOperadorLocal })
-        });
-        ehfBipSession = data.session || ehfBipSession;
-        ehfRenderBipSession(ehfBipSession);
-        if (data.duplicate) {
-          tocarSomConfirmacaoLeitura(false);
-          ehfBipToast('Esta etiqueta já foi bipada nesta conferência.', true);
-          return;
-        }
-        const lookup = data.lookup || {};
-        const infoOriginal = identificarEtiqueta(codigoDigitado);
-        const actualChannel = data.actualChannel || {};
-        const infoEtiqueta = {
-          ...infoOriginal,
-          plataforma: actualChannel.platform || infoOriginal.plataforma,
-          canal: actualChannel.code || infoOriginal.canal,
-          canalNome: actualChannel.name || infoOriginal.canalNome,
-          idEtiqueta: lookup.codigoNormalizado || lookup.codigoLido || infoOriginal.idEtiqueta,
-          codigoRastreio: lookup.pedido?.codigoRastreamento || infoOriginal.codigoRastreio,
-          status: data.channelMatch ? 'Conferido' : 'Canal divergente',
-          observacao: data.channelMatch ? infoOriginal.observacao : `Selecionado ${data.expectedChannel?.name}; identificado ${actualChannel.name || 'outro canal'}`
-        };
-        const destino = lookup.lojaKey
-          ? { lojaKey: lookup.lojaKey, lojaNome: lookup.lojaNome || lookup.lojaKey, canalEsperado: ehfBipSession.session.channel_name, esperado: 0, bipado: 0, restante: 0 }
-          : escolherLojaParaBipagem(infoEtiqueta);
-        const agora = Date.now();
-        const novaBipagemRef = push(bipagemRef);
-        const payloadBipagem = {
-          codigo: codigoDigitado,
-          codigoLimpo: infoEtiqueta.codigoLimpo || lookup.codigoNormalizado || codigoDigitado,
-          plataforma: infoEtiqueta.plataforma,
-          canal: infoEtiqueta.canal,
-          canalNome: infoEtiqueta.canalNome,
-          canalEsperado: ehfBipSession.session.channel_name,
-          lojaKey: destino.lojaKey,
-          lojaNome: destino.lojaNome,
-          esperadoCanalLoja: destino.esperado,
-          bipadoAntesCanalLoja: destino.bipado,
-          restanteAntesCanalLoja: destino.restante,
-          idEtiqueta: infoEtiqueta.idEtiqueta,
-          codigoRastreio: infoEtiqueta.codigoRastreio,
-          tipo: infoEtiqueta.tipo,
-          observacao: infoEtiqueta.observacao,
-          status: infoEtiqueta.status,
-          operador: nomeOperadorLocal,
-          coletor: ehfBipSession.session.collector_name,
-          sessaoBipagemId: ehfBipSession.session.id,
-          pedidoTiny: lookup.pedido?.numero || '',
-          pedidoMarketplace: lookup.pedido?.numeroEcommerce || '',
-          totalUnidades: Number(lookup.totalUnidades || 0),
-          horario: formatHorarioBrasilia(new Date(), true),
-          horarioCompleto: formatHorarioBrasilia(new Date(), true),
-          ts: agora
-        };
-        await set(novaBipagemRef, payloadBipagem).catch(() => {});
-        tocarSomConfirmacaoLeitura(data.channelMatch !== false);
-        const corStatus = data.channelMatch !== false ? '#5bae5f' : '#ef4444';
-        set(alertaBroadcastRef, { txt: `O operador <b>${nomeOperadorLocal}</b> bipou: <b>${payloadBipagem.lojaNome}</b> — <b>${payloadBipagem.canalEsperado}</b> <span style="color:${corStatus};">(${payloadBipagem.status})</span><br>Pedido: <b>${payloadBipagem.pedidoMarketplace || payloadBipagem.pedidoTiny || '-'}</b> · Código: <b>${payloadBipagem.idEtiqueta || payloadBipagem.codigoRastreio || codigoDigitado}</b>`, ts: agora });
-        ehfBipToast(`${payloadBipagem.lojaNome} · pedido ${payloadBipagem.pedidoMarketplace || payloadBipagem.pedidoTiny || 'localizado'} · ${payloadBipagem.totalUnidades} unidade(s)`);
-      } catch (error) {
-        const detail = error.data?.session;
-        if (detail) ehfRenderBipSession(detail);
+      const rawCode = String(codigoDigitado || '').trim();
+      const normalized = limparCodigoBipado(rawCode);
+      if (input) { input.value = ''; input.focus(); }
+      if (!normalized) return;
+
+      if (ehfFastBipSeen.has(normalized)) {
         tocarSomConfirmacaoLeitura(false);
-        ehfBipToast(error.message || 'Etiqueta não localizada.', true);
-      } finally {
-        if (input) { input.disabled = false; input.value = ''; input.focus(); }
+        ehfBipToast(`Duplicado: ${normalized} já foi bipado hoje.`, true);
+        return;
       }
+
+      // A partir daqui a leitura física está aceita. Nada de Tiny/planilha bloqueia o leitor.
+      ehfFastBipSeen.add(normalized);
+      const info = identificarEtiqueta(rawCode);
+      const novaBipagemRef = push(bipagemRef);
+      const firebaseKey = novaBipagemRef.key || '';
+      const optimistic = ehfFastOptimisticPayload(rawCode, normalized, info, firebaseKey);
+      set(novaBipagemRef, optimistic).catch(()=>{});
+      tocarSomConfirmacaoLeitura(true);
+
+      const item = {
+        code: rawCode,
+        normalized,
+        sessionId: Number(ehfBipSession.session.id),
+        operator: nomeOperadorLocal,
+        capturedAt: new Date().toISOString(),
+        firebaseKey,
+        optimistic,
+        attempts: 0,
+        nextAt: 0
+      };
+      ehfFastBipQueue.push(item);
+      ehfFastPersistQueue();
+      ehfFastDrainQueue();
+      ehfBipToast(`Bipado: ${normalized} · salvo, identificando em segundo plano.`);
     }
 
     function garantirCabecalhoTabelaBipagem() {
@@ -1274,7 +1449,7 @@
       totalBipadosFisico = 0;
       let bipesNaUltimaHora = 0;
       const umaHoraAtras = Date.now() - (60 * 60 * 1000);
-      const listaOrdenada = dados ? Object.values(dados).sort((a, b) => Number(b.ts || 0) - Number(a.ts || 0)) : [];
+      const listaOrdenada = dados ? Object.entries(dados).map(([firebaseKey, value]) => ({ ...(value || {}), _firebaseKey: firebaseKey })).sort((a, b) => Number(b.ts || 0) - Number(a.ts || 0)) : [];
       ehfBipagensCache = listaOrdenada.map(b => {
         if (!b.canalNome || b.canalNome === "Desconhecido" || b.plataforma === "Desconhecida") {
           const reprocessado = identificarEtiqueta(b.codigo || b.codigoLimpo || "");
@@ -1284,6 +1459,8 @@
       });
       totalBipadosFisico = ehfBipagensCache.length;
       ehfBipagensCache.forEach(b => {
+        const seenCode = String(b.codigoLimpo || b.codigo || '').trim();
+        if (seenCode) ehfFastBipSeen.add(seenCode);
         if (b.ts && b.ts >= umaHoraAtras) bipesNaUltimaHora++;
         const lojaNome = b.lojaNome || NOMES_LOJAS_BIPAGEM[b.lojaKey] || "Não localizada";
         const plataforma = b.plataforma || "Desconhecida";
@@ -2342,3 +2519,5 @@ onValue(alertaBroadcastRef, (snapshot) => {
   else initSidebarToggle();
 })();
 
+
+window.EHF_BIPAGEM_FAST_VERSION = '4.2.51-BIPAGEM-ASYNC-FAST-QUEUE';
