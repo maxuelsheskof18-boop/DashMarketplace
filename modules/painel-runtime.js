@@ -2054,19 +2054,44 @@ onValue(alertaBroadcastRef, (snapshot) => {
       ?[
         ['Canceladas · não enviar',queueCount(mode,['canceladas','TASK_CANCELLED','TASK_CANCELED','CANCELLED','CANCELED']),'danger'],
         ['Atrasadas · enviar',delayed,'danger'],
-        ['Etiquetas para imprimir',queueCount(mode,['etiquetas','TASK_READY_TO_PRINT','READYTOPRINT']),''],
-        ['Reagendadas',queueCount(mode,['reagendadas','TASK_RESCHEDULED','RESCHEDULED','REAGENDADA']),''],
-        ['Prontas para enviar',queueCount(mode,['prontas','TASK_READY_TO_DISPATCH','READYTODISPATCH']),'']
+        ['Etiquetas para imprimir',queueCount(mode,['etiquetas','TASK_READY_TO_PRINT','READYTOPRINT']),'warning'],
+        ['Reagendadas',queueCount(mode,['reagendadas','TASK_RESCHEDULED','RESCHEDULED','REAGENDADA']),'info'],
+        ['Prontas para enviar',queueCount(mode,['prontas','TASK_READY_TO_DISPATCH','READYTODISPATCH']),'success']
       ]
       :[
         ['Canceladas · não enviar',queueCount(mode,['canceladas','TASK_CANCELLED','TASK_CANCELED','CANCELLED','CANCELED']),'danger'],
         ['Atrasadas · enviar',delayed,'danger'],
-        ['NF-e para gerenciar',queueCount(mode,['nfe','TASK_INVOICES_TO_BE_MANAGED','INVOICESTOBEMANAGED']),''],
-        ['Etiquetas para imprimir',queueCount(mode,['etiquetas','TASK_READY_TO_PRINT','READYTOPRINT']),''],
-        ['Prontas para enviar',queueCount(mode,['prontas','TASK_READY_TO_DISPATCH','READYTODISPATCH']),''],
-        ['Com mensagens não lidas',queueCount(mode,['mensagens','UNREAD_MESSAGES','TASK_UNREAD_MESSAGES']),'']
+        ['NF-e para gerenciar',queueCount(mode,['nfe','TASK_INVOICES_TO_BE_MANAGED','INVOICESTOBEMANAGED']),'info'],
+        ['Etiquetas para imprimir',queueCount(mode,['etiquetas','TASK_READY_TO_PRINT','READYTOPRINT']),'warning'],
+        ['Prontas para enviar',queueCount(mode,['prontas','TASK_READY_TO_DISPATCH','READYTODISPATCH']),'success'],
+        ['Mensagens não lidas',queueCount(mode,['mensagens','UNREAD_MESSAGES','TASK_UNREAD_MESSAGES']),'info']
       ];
-    return `<div class="ml-queue-list">${rows.map(([label,value,klass])=>`<div class="ml-queue-row ${klass}"><span>${esc(label)}</span><strong>${value===null||value===undefined?'—':Number(value||0)}</strong></div>`).join('')}</div>`;
+    return `<div class="ml-queue-list">${rows.map(([label,value,klass])=>{
+      const missing=value===null||value===undefined;
+      const numeric=missing?null:Number(value||0);
+      return `<div class="ml-queue-row ${klass}${numeric===0?' zero':''}"><span>${esc(label)}</span><strong>${missing?'—':numeric}</strong></div>`;
+    }).join('')}</div>`;
+  }
+
+  function copyIcon(){
+    return `<svg class="ml-copy-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M9 8.5V6.8c0-1 .8-1.8 1.8-1.8h6.4c1 0 1.8.8 1.8 1.8v6.4c0 1-.8 1.8-1.8 1.8h-1.7" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><rect x="5" y="9" width="10" height="10" rx="2" stroke="currentColor" stroke-width="1.8"/></svg>`;
+  }
+
+  function renderMode(mode, modality){
+    const view=modeDisplay(mode);
+    const name=modality==='FLEX'?'Flex':'Agência / Coleta';
+    const subtitle=modality==='FLEX'?'Envios Flex do dia':'Envios para agência/coleta';
+    const delayedText=view.delayedVerified?String(view.delayed):'—';
+    const delayZero=view.delayedVerified&&Number(view.delayed||0)===0;
+    return `<div class="ml-mode">
+      <div class="ml-mode-head">
+        <div class="ml-mode-name"><label>${name}</label><small>${subtitle}</small></div>
+        <div class="ml-mode-total"><small>Total</small><b>${view.value}</b></div>
+      </div>
+      <div class="ml-mode-delay${delayZero?' zero':''}"><span>Atrasados no cartão</span><strong>${delayedText}</strong></div>
+      ${view.verified?'':`<small class="ml-count-pending">Contador pendente · ${view.observed} registro(s) observado(s)</small>`}
+      ${queueRows(mode,modality)}
+    </div>`;
   }
 
   function renderAccount(account){
@@ -2079,14 +2104,18 @@ onValue(alertaBroadcastRef, (snapshot) => {
     const authCode=String(account.authorizationCode||'').trim();
     const authStatus=String(account.authorizationCodeStatus||'').trim();
     const accountError=String(account.error||flex.error||coleta.error||'').trim();
+    const codeTitle=String(account.authorizationCodeError||authStatus||'Código diário de autorização/devolução do Mercado Livre');
     return `<article class="ml-account-card">
       <div class="ml-account-title"><b>${esc(account.label||account.key)}</b><span class="${complete?'ok':'warn'}">${complete?'LEITURA COMPLETA':'VERIFICAR'}</span></div>
       ${accountError?`<div class="ml-account-error" title="${esc(accountError)}">${esc(accountError)}</div>`:''}
       <div class="ml-cutoff"><small>Agência / Coleta até</small><strong class="${cutoff==='Não disponível no retorno'?'missing':''}">${esc(cutoff)}</strong></div>
-      <div class="ml-auth-code ${authCode?'':'missing'}" title="${esc(account.authorizationCodeError||authStatus||'')}"><span>Código de autorização/devolução</span><b>${esc(authCode||'Não disponível')}</b></div>
+      <div class="ml-auth-code ${authCode?'':'missing'}" title="${esc(codeTitle)}">
+        <div class="ml-auth-code-info"><span>Código de devolução</span><b>${esc(authCode||'Não disponível')}</b></div>
+        <button class="ml-copy-code" type="button" data-ml-copy-code="${esc(authCode)}" ${authCode?'':'disabled'} aria-label="Copiar código de devolução ${esc(authCode)}">${copyIcon()}<span>Copiar</span></button>
+      </div>
       <div class="ml-mode-grid">
-        <div class="ml-mode"><label>Flex</label><b>${flexView.value}</b><em>${flexView.delayedVerified?flexView.delayed:'—'} atrasado(s)</em>${flexView.verified?'':`<small class="ml-count-pending">contador não confirmado · ${flexView.observed} registro(s) observado(s)</small>`}${queueRows(flex,'FLEX')}</div>
-        <div class="ml-mode"><label>Agência / Coleta</label><b>${coletaView.value}</b><em>${coletaView.delayedVerified?coletaView.delayed:'—'} atrasado(s)</em>${coletaView.verified?'':`<small class="ml-count-pending">contador não confirmado · ${coletaView.observed} registro(s) observado(s)</small>`}${queueRows(coleta,'COLETA')}</div>
+        ${renderMode(flex,'FLEX')}
+        ${renderMode(coleta,'COLETA')}
       </div>
     </article>`;
   }
@@ -2221,9 +2250,11 @@ onValue(alertaBroadcastRef, (snapshot) => {
       }else{
         badge.textContent=exact?'CONTAGEM EXATA':'LEITURA PARCIAL';
         badge.className='ml-source-badge '+(exact?'ok':'warn');
-        status.textContent=exact
-          ?`Leitura direta concluída: ${Number(data.totals?.packages||0)} pacote(s), sendo ${Number(data.totals?.flex||0)} Flex e ${Number(data.totals?.coleta||0)} Agência/Coleta. Atualizado em ${updatedDate.toLocaleTimeString('pt-BR')}.`
-          :'Uma ou mais filas não confirmou o contador de pacotes. Para evitar número incorreto, o painel mostra “—” até validar Pack ID, shipment ou o contador específico do cartão.';
+        if(exact){
+          status.innerHTML=`<span class="ml-status-chip"><strong>${Number(data.totals?.packages||0)}</strong> pacotes</span><span class="ml-status-chip flex"><strong>${Number(data.totals?.flex||0)}</strong> Flex</span><span class="ml-status-chip coleta"><strong>${Number(data.totals?.coleta||0)}</strong> Agência/Coleta</span><span class="ml-status-chip time">Atualizado <strong>${updatedDate.toLocaleTimeString('pt-BR')}</strong></span>`;
+        }else{
+          status.textContent='Uma ou mais filas não confirmou o contador de pacotes. Para evitar número incorreto, o painel mostra “—” até validar Pack ID, shipment ou o contador específico do cartão.';
+        }
         status.className='ml-deadline-status '+(exact?'':'warn');
       }
     }catch(error){
@@ -2245,8 +2276,69 @@ onValue(alertaBroadcastRef, (snapshot) => {
 
   document.addEventListener('DOMContentLoaded',()=>{
     document.getElementById('btn-refresh-ml-deadlines')?.addEventListener('click',()=>load(true));
+    document.addEventListener('click',async event=>{
+      const button=event.target.closest?.('[data-ml-copy-code]');
+      if(!button||button.disabled)return;
+      const code=String(button.dataset.mlCopyCode||'').trim();
+      if(!code)return;
+      const label=button.querySelector('span');
+      const original=label?.textContent||'Copiar';
+      try{
+        if(navigator.clipboard?.writeText){
+          await navigator.clipboard.writeText(code);
+        }else{
+          const textarea=document.createElement('textarea');textarea.value=code;textarea.style.position='fixed';textarea.style.opacity='0';document.body.appendChild(textarea);textarea.select();document.execCommand('copy');textarea.remove();
+        }
+        button.classList.add('copied');if(label)label.textContent='Copiado';
+        const toast=document.getElementById('toast-container');if(toast){toast.textContent=`Código ${code} copiado.`;toast.style.display='block';setTimeout(()=>{toast.style.display='none';},1800);}
+      }catch(error){
+        if(label)label.textContent='Erro';
+        console.error('Falha ao copiar código do Mercado Livre:',error);
+      }finally{
+        setTimeout(()=>{button.classList.remove('copied');if(label)label.textContent=original;},1400);
+      }
+    });
     load(false);
     setInterval(()=>load(false),60000);
   });
   window.ehfAtualizarHorariosMercadoLivre=load;
 })();
+
+/* ===== UX 4.2.50 — Menu lateral recolhível ===== */
+(()=>{
+  const STORAGE_KEY='ehf_sidebar_collapsed';
+
+  function initSidebarToggle(){
+    const button=document.getElementById('enterprise-sidebar-toggle');
+    const sidebar=document.querySelector('.enterprise-sidebar');
+    if(!button||!sidebar)return;
+
+    document.querySelectorAll('.enterprise-nav-item').forEach(item=>{
+      const text=Array.from(item.children).find(el=>el.tagName==='SPAN'&&!el.classList.contains('nav-icon')&&!el.classList.contains('nav-badge'))?.textContent?.trim();
+      if(text&&!item.getAttribute('title'))item.setAttribute('title',text);
+    });
+
+    const apply=()=>{
+      const desktop=window.innerWidth>900;
+      const wanted=localStorage.getItem(STORAGE_KEY)==='1';
+      const collapsed=desktop&&wanted;
+      document.body.classList.toggle('ehf-sidebar-collapsed',collapsed);
+      button.setAttribute('aria-expanded',String(!collapsed));
+      button.setAttribute('aria-label',collapsed?'Expandir menu lateral':'Recolher menu lateral');
+      button.title=collapsed?'Expandir menu':'Recolher menu';
+    };
+
+    button.addEventListener('click',()=>{
+      const next=!document.body.classList.contains('ehf-sidebar-collapsed');
+      localStorage.setItem(STORAGE_KEY,next?'1':'0');
+      apply();
+    });
+
+    window.addEventListener('resize',apply,{passive:true});
+    apply();
+  }
+
+  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',initSidebarToggle,{once:true});
+  else initSidebarToggle();
+})();
+
