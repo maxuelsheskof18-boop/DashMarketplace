@@ -15,13 +15,21 @@
       <div class="ehfm-metrics"><div class="ehfm-metric"><span>Total atrasados</span><b id="ehfm-late-total">0</b></div><div class="ehfm-metric flex"><span>Flex</span><b id="ehfm-late-flex">0</b></div><div class="ehfm-metric coleta"><span>Agência / Coleta</span><b id="ehfm-late-coleta">0</b></div><div class="ehfm-metric"><span>Com produtos</span><b id="ehfm-late-with-products">0</b></div><div class="ehfm-metric"><span>Sem produtos</span><b id="ehfm-late-without-products">0</b></div></div>
       <section class="ehfm-panel"><div class="ehfm-head"><div><h3 style="margin:0">Processamento dos produtos</h3><p id="ehfm-products-updated">Consultando o Easypanel...</p></div></div><div class="ehfm-process"><div class="ehfm-process-main"><b id="ehfm-products-stage">Base de produtos</b><small id="ehfm-products-detail">Carregando cobertura...</small><div class="ehfm-progress"><i id="ehfm-products-bar"></i></div><small id="ehfm-products-live">Aguardando</small></div><div class="ehfm-process-stat"><small>Separações ativas</small><strong id="ehfm-products-active">0</strong></div><div class="ehfm-process-stat"><small>Com produtos</small><strong id="ehfm-products-with">0</strong></div><div class="ehfm-process-stat"><small>Sem produtos</small><strong id="ehfm-products-without">0</strong></div><div class="ehfm-process-stat"><small>Linhas / unidades</small><strong id="ehfm-products-lines">0</strong><small id="ehfm-products-units">0 unidades</small></div></div></section>
       <section class="ehfm-panel"><div class="ehfm-filters"><select class="ehfm-select" id="ehfm-late-modality"><option value="TODOS">Flex e Coleta</option><option value="FLEX">Somente Flex</option><option value="COLETA">Somente Agência/Coleta</option></select><select class="ehfm-select" id="ehfm-late-store"><option value="">Todas as lojas</option></select><input class="ehfm-input" id="ehfm-late-search" placeholder="Pesquisar pedido, etiqueta, SKU, produto ou marcador"></div></section>
-      <section class="ehfm-panel"><div class="ehfm-head"><div><h3 style="margin:0">Pedidos consultados</h3></div><b id="ehfm-late-count">0 pedidos</b></div><div class="ehfm-table-wrap"><table class="ehfm-table"><thead><tr><th>Modalidade</th><th>Loja / pedido</th><th>Etiqueta / envio</th><th>Produtos</th><th>Motivo Tiny</th><th>Origem</th></tr></thead><tbody id="ehfm-late-rows"><tr><td colspan="6" class="ehfm-empty">Carregando...</td></tr></tbody></table></div></section>
+      <section class="ehfm-panel"><div class="ehfm-head"><div><h3 style="margin:0">Pedidos consultados</h3></div><b id="ehfm-late-count">0 pedidos</b></div><div class="ehfm-table-wrap"><table class="ehfm-table"><thead><tr><th>Modalidade</th><th>Loja / pedido</th><th>Etiqueta / envio</th><th>Produtos</th><th>Motivo Tiny</th><th>Solução</th></tr></thead><tbody id="ehfm-late-rows"><tr><td colspan="6" class="ehfm-empty">Carregando...</td></tr></tbody></table></div></section>
     </section>`;
     $('ehfm-late-refresh').onclick=load;
     $('ehfm-late-sync').onclick=syncAll;
     $('ehfm-products-rebuild').onclick=rebuildProducts;
     ['ehfm-late-modality','ehfm-late-store'].forEach(id=>$(id).onchange=renderRows);
     $('ehfm-late-search').oninput=renderRows;
+    // Delegado (as linhas são recriadas a cada renderRows): clique no botão
+    // "Adicionar solução" ou na nota já existente abre um prompt pra
+    // registrar/editar como aquele atraso foi resolvido.
+    $('ehfm-late-rows').addEventListener('click',(ev)=>{
+      const target=ev.target.closest('[data-solucao-id]');
+      if(!target)return;
+      abrirSolucao(Number(target.getAttribute('data-solucao-id')));
+    });
   }
   function alert(text,type=''){const el=$('ehfm-late-alert');if(!el)return;el.textContent=text||'';el.className='ehfm-alert'+(text?' show':'')+(type==='ok'?' ok':'');}
   function markerNames(p){return(p.marcadores||[]).map(m=>{if(typeof m==='string')return m;const x=m?.marcador||m?.marker||m||{};return x.description||x.descricao||x.nome||x.name||''}).filter(Boolean)}
@@ -40,8 +48,42 @@
       const products=items.length?items.slice(0,12).map(i=>`<div><strong>${esc(qty(i.quantidade))}×</strong> ${esc(i.descricao||'Produto')}<span class="ehfm-sub">${esc(i.codigo||'SEM SKU')}</span></div>`).join(''):'<span class="ehfm-sub">Produtos ainda não associados ao Tiny</span>';
       const codes=[...(p.shipmentIds||[]),...(p.packIds||[]),...(p.logisticCodes||[])].filter(Boolean);
       const ml=[...(p.pedidosMarketplace||[]),p.orderId].filter(Boolean);
-      return `<tr><td><span class="ehfm-badge ${modality==='FLEX'?'flex':'coleta'}">${esc(modality||'N/D')}</span><span class="ehfm-sub">${esc(p.modalidade||'')}</span></td><td><b>${esc(p.lojaNome||p.conta||'')}</b><span class="ehfm-sub">ML ${esc([...new Set(ml)].join(' · ')||'--')}</span><span class="ehfm-sub">Tiny ${esc(p.pedidoTiny||'--')} · Separação ${esc(p.separacaoId||'--')}</span></td><td><b>${esc([...new Set(codes)].join(' · ')||'Sem código logístico')}</b><span class="ehfm-sub">${esc(p.mensagem||'')}</span></td><td class="ehfm-products">${products}${items.length?`<span class="ehfm-sub">${items.length} linha(s) · ${qty(units)} unidade(s)</span>`:''}</td><td><b>${esc(reason(p))}</b><span class="ehfm-sub">${esc(markerNames(p).join(', '))}</span></td><td><b>${esc(p.propriedadeOrigem||'')}</b><span class="ehfm-sub">${esc(p.cookieStatus||'--')} · HTTP ${esc(p.httpStatus||0)}</span></td></tr>`;
+      const solucao=p.resolutionNote
+        ?`<div class="ehfm-solucao-nota" data-solucao-id="${esc(p.id)}" title="Clique pra editar">${esc(p.resolutionNote)}</div><span class="ehfm-sub">${esc(p.resolutionBy||'')}${p.resolutionAt?` · ${new Date(p.resolutionAt).toLocaleString('pt-BR')}`:''}</span>`
+        :`<button type="button" class="ehfm-btn ehfm-btn-sm" data-solucao-id="${esc(p.id)}">+ Adicionar solução</button>`;
+      return `<tr><td><span class="ehfm-badge ${modality==='FLEX'?'flex':'coleta'}">${esc(modality||'N/D')}</span><span class="ehfm-sub">${esc(p.modalidade||'')}</span></td><td><b>${esc(p.lojaNome||p.conta||'')}</b><span class="ehfm-sub">ML ${esc([...new Set(ml)].join(' · ')||'--')}</span><span class="ehfm-sub">Tiny ${esc(p.pedidoTiny||'--')} · Separação ${esc(p.separacaoId||'--')}</span></td><td><b>${esc([...new Set(codes)].join(' · ')||'Sem código logístico')}</b><span class="ehfm-sub">${esc(p.mensagem||'')}</span></td><td class="ehfm-products">${products}${items.length?`<span class="ehfm-sub">${items.length} linha(s) · ${qty(units)} unidade(s)</span>`:''}</td><td><b>${esc(reason(p))}</b><span class="ehfm-sub">${esc(markerNames(p).join(', '))}</span></td><td class="ehfm-solucao">${solucao}</td></tr>`;
     }).join(''):'<tr><td colspan="6" class="ehfm-empty">Nenhum pedido corresponde aos filtros.</td></tr>';
+  }
+  async function abrirSolucao(id){
+    const pedido=state.data.pedidos.find(p=>Number(p.id)===id);
+    if(!pedido)return;
+    const atual=pedido.resolutionNote||'';
+    const nota=prompt('Como esse atraso foi ou está sendo resolvido?',atual);
+    if(nota===null)return;
+    const texto=nota.trim();
+    if(texto===atual)return;
+    const operador=String(localStorage.getItem('ehf_operador')||'').trim();
+    try{
+      const r=await fetch(API_BASE()+`/api/pedidos-atrasados/${id}/solucao`,{
+        method:'POST',
+        headers:writeHeaders(),
+        body:JSON.stringify({nota:texto,operador})
+      });
+      const d=await r.json();
+      if(!r.ok||d.ok===false)throw new Error(d.error||`HTTP ${r.status}`);
+      pedido.resolutionNote=d.resolutionNote||'';
+      pedido.resolutionBy=d.resolutionBy||'';
+      pedido.resolutionAt=d.resolutionAt||'';
+      renderRows();
+    }catch(e){
+      alert(e.message||String(e));
+    }
+  }
+  function writeHeaders(){
+    const headers={'Accept':'application/json','Content-Type':'application/json'};
+    const apiKey=localStorage.getItem('ehf_api_key')||'';
+    if(apiKey)headers['x-api-key']=apiKey;
+    return headers;
   }
   function render(){
     const d=state.data;const pedidos=d.pedidos||[];const flex=Number(d.totalFlex??pedidos.filter(p=>p.modalidadeCodigo==='FLEX').length);const coleta=Number(d.totalColeta??pedidos.filter(p=>p.modalidadeCodigo==='COLETA').length);const withP=pedidos.filter(p=>(p.itens||[]).length).length;

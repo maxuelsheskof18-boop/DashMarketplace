@@ -422,13 +422,22 @@
       {
         titulo: "OUTRAS PLATAFORMAS",
         lojas: [
-          { id: 'amazon', name: 'AMAZON' },
-          { id: 'tiktok', name: 'TIKTOK' },
-          { id: 'melhor_envio', name: 'MELHOR ENVIO' },
-          { id: 'magalu', name: 'MAGALU' }
+          { id: 'amazon', name: 'AMAZON', defaultTime: '13:00' },
+          { id: 'tiktok', name: 'TIKTOK', defaultTime: '17:00' },
+          { id: 'melhor_envio', name: 'MELHOR ENVIO', defaultTime: '15:00' },
+          { id: 'magalu', name: 'MAGALU', defaultTime: '11:00' }
         ]
       }
     ];
+
+    // IDs das linhas cujo horário-limite é preenchido automaticamente a
+    // partir do cartão "Agência / Coleta até HH:MM" do Mercado Livre
+    // (mesma fonte do painel de cards mais abaixo, rota
+    // /api/mercadolivre/horarios), com 1h de folga subtraída. O id de cada
+    // linha já é igual à key da conta no Mercado Livre (comercio,
+    // suprimentos, ekn, distribuidora), então o cruzamento é direto.
+    const ML_AUTO_TIME_ROW_IDS = ['comercio', 'suprimentos', 'ekn', 'distribuidora'];
+    const ML_AUTO_TIME_BUFFER_MINUTES = 60;
 
     let localTasks = [];
     let isUpdatingFromFirebase = false;
@@ -1720,6 +1729,11 @@
         id: config.id,
         name: config.name,
         time: config.defaultTime || '',
+        // autoTime undefined = elegível pra receber o horário automático do
+        // Mercado Livre (linhas comercio/suprimentos/ekn/distribuidora).
+        // Vira false assim que o operador edita o campo manualmente, pra
+        // não ser sobrescrito no próximo ciclo de sincronização.
+        autoTime: undefined,
         coletado: false,
         enviado: false,
         finalizado: false,
@@ -1741,7 +1755,13 @@
         }
 
         task.name = config.name;
-        task.semHorario = !!config.semHorario;
+        // CORREÇÃO: antes esta linha rodava em TODO render (garantirTasksPadrao
+        // é chamada a cada renderEstructuralHTML) e resetava semHorario pro
+        // valor estático do config sempre — isso apagava, na hora seguinte,
+        // qualquer marcação manual de "sem horário hoje" feita pelo operador
+        // (checkbox adicionado abaixo). Agora só define o padrão na criação
+        // da task (dentro do criarTaskPadrao acima); depois disso o valor
+        // pertence ao operador/estado salvo.
         task.remessa = config.remessa || '';
 
         if (!task.time && config.defaultTime) {
@@ -1923,6 +1943,10 @@
               const horario = timeInput.value || '';
 
               t.time = horario;
+              // Edição manual do operador sempre vence: marca autoTime=false
+              // pra essa linha parar de ser sobrescrita pelo sync automático
+              // do horário do Mercado Livre (ver aplicarHorariosMercadoLivre).
+              if (ML_AUTO_TIME_ROW_IDS.includes(t.id)) t.autoTime = false;
               limparAlarmeTask(t.id);
 
               if (GROUP_TARGETS[t.id]) {
@@ -1948,6 +1972,7 @@
           const labelCo = criarCheckboxControle(t, 'coletado', 'Coletado', config, false);
           const labelEn = criarCheckboxControle(t, 'enviado', 'Enviado', config, false);
           const labelFi = criarCheckboxControle(t, 'finalizado', 'Finalizado', config, true);
+          const labelSh = criarCheckboxSemHorario(t);
 
           if (timeInput) {
             controls.appendChild(timeInput);
@@ -1955,6 +1980,7 @@
             controls.appendChild(timePlaceholder);
           }
 
+          controls.appendChild(labelSh);
           controls.appendChild(labelCo);
           controls.appendChild(labelEn);
           controls.appendChild(labelFi);
@@ -1969,6 +1995,108 @@
       });
 
       corrigirTextoSuprimentos();
+    }
+
+    // Checkbox pra o operador marcar manualmente "Não tem" numa linha — ou
+    // seja, não tem pacote/pedido a ser feito desse canal hoje (não é sobre
+    // desconhecer o horário, é sobre não ter volume pra rodar). Some o input
+    // de horário (ver `if (!t.semHorario)` acima) e some do cálculo de
+    // alarme, já que taskTemAlgumaCaixaMarcada/timeToMinutes tratam time
+    // vazio como "sem prazo a verificar". Mantido o nome interno do campo
+    // (semHorario) pra não quebrar o estado já salvo no Firebase — só o
+    // texto visível pro operador mudou.
+    function criarCheckboxSemHorario(task) {
+      const label = document.createElement('label');
+      label.className = 'checkbox-inline cp-sem-horario';
+
+      const box = document.createElement('input');
+      box.type = 'checkbox';
+      box.checked = !!task.semHorario;
+      box.id = `sem-horario-${task.id}`;
+
+      box.addEventListener('change', () => {
+        task.semHorario = box.checked;
+        if (task.semHorario) {
+          task.time = '';
+        }
+
+        limparAlarmeTask(task.id);
+        renderEstructuralHTML();
+
+        set(alertaBroadcastRef, {
+          txt: `O operador <b>${nomeOperadorLocal}</b> ${task.semHorario ? 'marcou' : 'desmarcou'} <b>${task.name}</b> como <b>Não tem</b> (sem pacotes a serem feitos hoje).`,
+          ts: Date.now()
+        });
+
+        pushStateToFirebase();
+        verificarAlarmesDePrazo();
+      });
+
+      label.appendChild(box);
+      label.appendChild(document.createTextNode('Não tem'));
+
+      return label;
+    }
+
+    function subtrairMinutosDeHorario(horario, minutos) {
+      const total = timeToMinutes(horario);
+      if (total === null) return '';
+      const ajustado = ((total - minutos) % 1440 + 1440) % 1440;
+      const h = String(Math.floor(ajustado / 60)).padStart(2, '0');
+      const m = String(ajustado % 60).padStart(2, '0');
+      return `${h}:${m}`;
+    }
+
+    // Puxa o horário-limite de cada conta (comercio/suprimentos/ekn/
+    // distribuidora) direto do cartão real do Mercado Livre ("Agência /
+    // Coleta até HH:MM", rota /api/mercadolivre/horarios — a mesma fonte
+    // do painel de cards mais abaixo na página) e aplica 1h de folga pra
+    // trás. Só sobrescreve linhas que o operador não editou manualmente
+    // (autoTime !== false) e que não estão marcadas como "sem horário".
+    async function aplicarHorariosMercadoLivre() {
+      try {
+        const resp = await fetch(EHF_WORKER_BASE + '/api/mercadolivre/horarios?_ts=' + Date.now(), {
+          cache: 'no-store',
+          headers: { 'Accept': 'application/json' }
+        });
+        if (!resp.ok) return;
+        const data = await resp.json();
+        if (!data || data.ok === false || !Array.isArray(data.accounts)) return;
+
+        let mudou = false;
+
+        data.accounts.forEach(account => {
+          const key = String(account?.key || '').toLowerCase().trim();
+          if (!ML_AUTO_TIME_ROW_IDS.includes(key)) return;
+
+          const task = getTaskById(key);
+          if (!task || task.semHorario || task.autoTime === false) return;
+
+          const cutoff = String(account?.cutoff || '').trim();
+          const novoHorario = cutoff ? subtrairMinutosDeHorario(cutoff, ML_AUTO_TIME_BUFFER_MINUTES) : '';
+
+          if (novoHorario && novoHorario !== task.time) {
+            task.time = novoHorario;
+            task.autoTime = true;
+            limparAlarmeTask(task.id);
+            mudou = true;
+          }
+        });
+
+        if (mudou) {
+          renderEstructuralHTML();
+          pushStateToFirebase();
+          verificarAlarmesDePrazo();
+        }
+      } catch (err) {
+        console.warn('Falha ao sincronizar horários do Mercado Livre no painel de alarme:', err);
+      }
+    }
+
+    if (!window.ehfMlAutoTimeEngineStarted) {
+      window.ehfMlAutoTimeEngineStarted = true;
+      setInterval(() => aplicarHorariosMercadoLivre(), 60000);
+      setTimeout(() => aplicarHorariosMercadoLivre(), 4000);
     }
 
     function criarCheckboxControle(task, campo, texto, config, greenLabel) {
@@ -2036,6 +2164,7 @@
         estadoParaSalvar.lojas[t.id] = {
           name: t.name,
           time: t.time || '',
+          autoTime: t.autoTime === undefined ? null : !!t.autoTime,
           coletado: !!t.coletado,
           enviado: !!t.enviado,
           finalizado: !!t.finalizado,
@@ -2090,11 +2219,17 @@
             id: config.id,
             name: config.name,
             time: salvo ? (salvo.time || config.defaultTime || '') : (config.defaultTime || ''),
+            // autoTime: se o estado salvo não trouxer o campo (compatibilidade
+            // com sessões antigas), assume undefined (elegível pra auto-sync).
+            autoTime: (salvo && salvo.autoTime !== undefined && salvo.autoTime !== null) ? !!salvo.autoTime : undefined,
             coletado: salvo ? !!salvo.coletado : false,
             enviado: salvo ? !!salvo.enviado : false,
             finalizado: salvo ? !!salvo.finalizado : false,
             finalizadoEm: salvo ? (salvo.finalizadoEm || '') : '',
-            semHorario: !!config.semHorario,
+            // CORREÇÃO: antes ignorava salvo.semHorario e sempre usava o
+            // config estático — a marcação manual do operador não sobrevivia
+            // a um reload da página. Agora, se veio salva, ela manda.
+            semHorario: salvo && salvo.semHorario !== undefined ? !!salvo.semHorario : !!config.semHorario,
             remessa: config.remessa || (salvo ? (salvo.remessa || '') : '')
           });
         });
