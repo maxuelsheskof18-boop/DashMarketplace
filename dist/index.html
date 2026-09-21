@@ -4827,14 +4827,34 @@ document.addEventListener('DOMContentLoaded',()=>setTimeout(ehfApplyHashView,0))
         return data;
       }
 
+      // v4.2.52: um payload de formasEnvio só é inútil quando nenhuma loja tem
+      // nenhuma contagem. A presença de fallbackFrom sozinha não diz nada sobre
+      // a qualidade do dado — o tiny-worker marca isso em toda consolidação.
+      function ehfFormasEnvioTemDados(data) {
+        const formas = data && data.formasEnvio;
+        if (!formas || typeof formas !== 'object') return false;
+
+        return Object.values(formas).some(loja => {
+          if (!loja || typeof loja !== 'object') return false;
+          return Object.values(loja).some(bucket =>
+            bucket && typeof bucket === 'object' && Object.keys(bucket).length > 0
+          );
+        });
+      }
+
       async function buscarFormasEnvio() {
         const data = await fetchApiJson(`${SUMMARY_API_BASE}/api/formasEnvio`, { noJsonp: true, timeout: 60000 });
 
-        // v4.2.7: formasEnvio de fallback não pode derrubar syncOnce.
-        // Se for fallback antigo, ignora e deixa os canais serem derivados do /api/summary.
-        if (data?.fallbackFrom === 'APP_STATE_SUMMARY_PLANILHA_LATEST') {
-          console.warn('FormasEnvio fallback ignorado sem quebrar sincronização:', data.fallbackFrom);
+        // v4.2.52: mesmo tratamento que buscarResumo() já fazia desde a v4.2.7.
+        // O tiny-worker marca fallbackFrom sempre que consolida o snapshot da planilha,
+        // mas o payload continua sendo o canônico. Só descarta se vier realmente vazio.
+        if (data?.fallbackFrom && !ehfFormasEnvioTemDados(data)) {
+          console.warn('FormasEnvio de fallback descartado por vir sem contagens:', data.fallbackFrom);
           return null;
+        }
+
+        if (data?.fallbackFrom) {
+          console.warn('FormasEnvio veio com fallbackFrom, mas será aceito por conter contagens:', data.fallbackFrom);
         }
 
         return data;
@@ -4856,8 +4876,8 @@ document.addEventListener('DOMContentLoaded',()=>setTimeout(ehfApplyHashView,0))
           return stores;
         }
 
-        if (formasEnvioData.fallbackFrom === 'APP_STATE_SUMMARY_PLANILHA_LATEST') {
-          console.warn('Ignorando formasEnvio do fallback antigo:', formasEnvioData.fallbackFrom);
+        if (formasEnvioData.fallbackFrom && !ehfFormasEnvioTemDados(formasEnvioData)) {
+          console.warn('Ignorando formasEnvio de fallback sem contagens:', formasEnvioData.fallbackFrom);
           return stores;
         }
 
