@@ -172,7 +172,10 @@
 
   async function fetchItensRomaneio(romaneio){
     const mes=getMonthFromRow(romaneio);
-    const data=await jsonp('romaneioItens', { mes, limit: 12000 });
+    const r=normalizeRow(romaneio);
+    // Manda a sessão junto: sem isso o Apps Script devolve os scans do mês
+    // inteiro por JSONP só para o cliente descartar quase tudo em seguida.
+    const data=await jsonp('romaneioItens', { mes, limit: 12000, session: r.session || r.key });
     if(!data || data.ok===false) throw new Error(data?.error || data?.detail || 'Não consegui consultar os itens do romaneio.');
     return filterItemsForRomaneio(data.rows || data.itens || [], romaneio);
   }
